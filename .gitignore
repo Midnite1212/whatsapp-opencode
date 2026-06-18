@@ -1,0 +1,24 @@
+# Secrets — never commit real credentials
+.env
+.env.*
+
+# PAI working memory / PRD tracking
+MEMORY/
+
+# OpenCode: commit the source agents/commands, ignore local runtime/auth/cache
+/workspace/downloads/
+.opencode/*
+!.opencode/agent/
+!.opencode/command/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

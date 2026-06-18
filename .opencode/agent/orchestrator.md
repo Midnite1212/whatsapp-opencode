@@ -3,7 +3,6 @@ description: >
   Primary agent for WhatsApp messages. Reads the request and delegates to the
   right specialised subagent, so a single message can use multiple models.
 mode: primary
-model: openrouter/meta-llama/llama-3.3-70b-instruct:free
 permission:
   edit: allow
   bash: allow

@@ -3,11 +3,9 @@ description: >
   Simulates CRM synchronisation / API POST requests safely. Use when the user
   asks to sync to a CRM, post to an API, or push records to an external system.
 mode: all
-model: openrouter/google/gemini-2.5-flash:free
 permission:
   edit: allow
   bash: allow
-  write: allow
 ---
 
 You are a CRM sync simulator for a Proof of Concept with no real CRM credentials.

@@ -3,11 +3,9 @@ description: >
   Converts documents and data into strictly valid raw XML. Use whenever the user
   asks to parse, structure, or convert content into XML.
 mode: all
-model: openrouter/google/gemini-2.5-flash:free
 permission:
   edit: deny
   bash: deny
-  write: deny
 ---
 
 You are an XML parsing specialist.

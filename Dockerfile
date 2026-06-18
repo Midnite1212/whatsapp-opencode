@@ -37,9 +37,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Application code (WhatsApp adapter + shared core + Discord adapter).
 COPY server.py core.py discord_bot.py ./
 
-# OpenCode reads AGENTS.md and .opencode/agent/*.md from its working directory.
-# We run OpenCode inside /workspace, so both must live there.
+# OpenCode reads AGENTS.md, opencode.json, and .opencode/agent/*.md from its
+# working directory. We run OpenCode inside /workspace, so they must live there.
 COPY AGENTS.md /workspace/AGENTS.md
+COPY opencode.json /workspace/opencode.json
 COPY .opencode /workspace/.opencode
 
 # Isolated, writable location for inbound WhatsApp documents.

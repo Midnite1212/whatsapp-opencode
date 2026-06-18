@@ -11,8 +11,19 @@ Secrets come from environment variables:
 """
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone, timedelta
+
+# Strips ANSI escape sequences (colour codes) from OpenCode's terminal output.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
+
+
+def _clean(text) -> str:
+    # On timeout, subprocess returns bytes even with text=True — decode defensively.
+    if isinstance(text, (bytes, bytearray)):
+        text = text.decode("utf-8", errors="replace")
+    return _ANSI_RE.sub("", text or "").strip()
 
 from pymongo import MongoClient
 
@@ -35,9 +46,15 @@ OPENCODE_TIMEOUT = int(os.environ.get("OPENCODE_TIMEOUT", "300"))
 # Multi-model per message via a primary 'orchestrator' agent (off by default).
 USE_ORCHESTRATOR = os.environ.get("USE_ORCHESTRATOR", "false").lower() == "true"
 
-# OpenRouter free-tier model IDs. OpenCode addresses them as `openrouter/<id>`.
-MODEL_STRUCTURAL = "google/gemini-2.5-flash:free"           # parsing / structured work
-MODEL_GENERAL = "meta-llama/llama-3.3-70b-instruct:free"    # general conversation
+# Model IDs are OpenRouter slugs (without the `openrouter/` provider prefix that
+# run_opencode adds). Default is `openrouter/free` — OpenRouter's "Free Models
+# Router", which picks an available free model at random and filters out ones
+# that are down/rate-limited. That solves the free-model churn without env vars.
+# (So OpenCode receives `-m openrouter/openrouter/free`: provider=openrouter,
+#  model=openrouter/free — the double prefix is correct, not a typo.)
+# Still env-overridable if you ever want to pin a specific model.
+MODEL_GENERAL = os.environ.get("MODEL_GENERAL", "openrouter/free")
+MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", MODEL_GENERAL)
 
 STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
 XML_AGENT_KEYWORDS = ("xml", "parse")
@@ -129,50 +146,64 @@ def run_opencode(
 ) -> str:
     """Run OpenCode headlessly (`opencode run`) and return its stdout.
 
-    Use exactly one of `agent` (uses that agent's own model) or `model_id`
-    (raw model via `-m`); `-m` would override an agent's model otherwise.
-    Auth uses OPENROUTER_API_KEY in the env. `--dangerously-skip-permissions`
-    stops the headless run from hanging on permission prompts.
+    `model_id` (env-driven, `MODEL_GENERAL` default) is always pinned via
+    `-m openrouter/<model>` so OpenCode can't fall back to a non-free default.
+    `agent` optionally layers behaviour/tools on top. Auth uses OPENROUTER_API_KEY.
+    `--dangerously-skip-permissions` stops headless hangs on permission prompts.
     """
     prompt = history_and_prompt
     if file_path:
         prompt += f"\n\nA document is available at: {file_path}\nRead, parse, and handle it."
 
-    child_env = {**os.environ, "OPENROUTER_API_KEY": OPENROUTER_API_KEY}
+    # NO_COLOR keeps OpenCode from wrapping output in ANSI escape codes.
+    child_env = {**os.environ, "OPENROUTER_API_KEY": OPENROUTER_API_KEY, "NO_COLOR": "1"}
 
-    cmd = ["opencode", "run", prompt]
+    # Always pin the model via -m so OpenCode can't wander onto a non-free
+    # default; --agent (optional) only layers behaviour/tools on top.
+    cmd = ["opencode", "run", prompt, "-m", f"openrouter/{model_id or MODEL_GENERAL}"]
     if agent:
         cmd += ["--agent", agent]
-    else:
-        cmd += ["-m", f"openrouter/{model_id or MODEL_GENERAL}"]
     cmd += ["--dangerously-skip-permissions"]
 
-    result = subprocess.run(
-        cmd,
-        cwd=WORKSPACE_DIR,           # so OpenCode picks up /workspace/AGENTS.md and agents
-        env=child_env,
-        capture_output=True,
-        text=True,
-        timeout=OPENCODE_TIMEOUT,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=WORKSPACE_DIR,           # so OpenCode picks up /workspace/AGENTS.md, agents, opencode.json
+            env=child_env,
+            stdin=subprocess.DEVNULL,    # never block waiting for interactive input (TTY-less)
+            capture_output=True,
+            text=True,
+            timeout=OPENCODE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # Surface whatever OpenCode printed before we killed it — turns a blind
+        # 300s hang into an actionable error (e.g. an auth/network message).
+        partial = _clean(exc.stderr or exc.stdout or "")
+        tail = partial[-600:] if partial else "(no output captured before timeout)"
+        raise RuntimeError(
+            f"OpenCode timed out after {OPENCODE_TIMEOUT}s. Last output:\n{tail}"
+        ) from exc
 
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "OpenCode exited non-zero")
+        # Include BOTH streams — OpenCode often writes the real error to stdout
+        # while stderr only carries the run header.
+        detail = _clean(f"{result.stdout}\n{result.stderr}") or "OpenCode exited non-zero"
+        raise RuntimeError(detail[-800:])
 
-    return result.stdout.strip() or "(OpenCode produced no output.)"
+    return _clean(result.stdout) or "(OpenCode produced no output.)"
 
 # TODO: Consider adding local LLM model for basic conversations, to speed up simple chats and save OpenRouter calls for heavier lifting.
 def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
              default_agent: str | None = None) -> str:
-    """Decide how a message is run (orchestrator vs keyword routing) and run it."""
+    """Decide how a message is run and run it. One env-driven model is always
+    pinned; routing only picks an optional specialist agent on top."""
+    model_id = route_model_automatically(routing_text)
     if USE_ORCHESTRATOR:
-        return run_opencode(full_prompt, agent="orchestrator", file_path=file_path)
+        return run_opencode(full_prompt, model_id=model_id, agent="orchestrator",
+                            file_path=file_path)
 
     agent = route_agent_automatically(routing_text) or default_agent
-    if agent:
-        return run_opencode(full_prompt, agent=agent, file_path=file_path)
-    return run_opencode(full_prompt, model_id=route_model_automatically(routing_text),
-                        file_path=file_path)
+    return run_opencode(full_prompt, model_id=model_id, agent=agent, file_path=file_path)
 
 
 # ---------------------------------------------------------------------------

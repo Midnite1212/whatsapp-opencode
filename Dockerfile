@@ -34,8 +34,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code.
-COPY server.py .
+# Application code (WhatsApp adapter + shared core + Discord adapter).
+COPY server.py core.py discord_bot.py ./
 
 # OpenCode reads AGENTS.md and .opencode/agent/*.md from its working directory.
 # We run OpenCode inside /workspace, so both must live there.

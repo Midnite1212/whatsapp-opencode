@@ -41,6 +41,7 @@ MONGO_URL = os.environ.get("MONGO_URL")  # only required when HISTORY_ENABLED
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "/workspace")
 DOWNLOADS_DIR = os.path.join(WORKSPACE_DIR, "downloads")
+AGENT_DIR = os.path.join(WORKSPACE_DIR, ".opencode", "agent")
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 # Conversation context older than this is wiped and started fresh.
@@ -65,7 +66,7 @@ MODEL_GENERAL = os.environ.get("MODEL_GENERAL", "openrouter/free")
 # found that support tool use". So default this to a free, tool-capable coder model.
 # Other free tool-capable options if congested: openai/gpt-oss-120b:free,
 # qwen/qwen3-next-80b-a3b-instruct:free, meta-llama/llama-3.3-70b-instruct:free.
-MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", "qwen/qwen3-coder:free")
+MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", "openrouter/free")
 
 STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
 XML_AGENT_KEYWORDS = ("xml", "parse")
@@ -238,6 +239,77 @@ def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
 # ---------------------------------------------------------------------------
 # The one entry point both adapters call
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Help / introspection — answered directly in Python, NO model call. This is the
+# only reliable way to list our custom agents: the LLM can't see them (it only
+# knows OpenCode's built-ins), and it works even when the model is rate-limited.
+# ---------------------------------------------------------------------------
+def is_help_command(text: str) -> bool:
+    """True if the message is asking what the bot can do / which agents exist."""
+    t = text.strip().lower().lstrip("/")
+    if t in ("help", "agents", "skills", "commands"):
+        return True
+    return any(phrase in t for phrase in (
+        "what can you do", "what agents", "what skills", "which agents",
+        "list agents", "list your agents", "your agents", "your skills",
+        "available agents", "custom agents",
+    ))
+
+
+def _agent_description(path: str) -> str:
+    """Pull the `description` value out of an agent .md's YAML frontmatter."""
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        return ""
+    for i, line in enumerate(lines):
+        if line.strip().startswith("description:"):
+            inline = line.split("description:", 1)[1].strip().lstrip(">").strip()
+            if inline:
+                return inline
+            # Folded scalar: collect the following indented lines.
+            collected = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and (nxt.startswith(" ") or nxt.startswith("\t")):
+                    collected.append(nxt.strip())
+                else:
+                    break
+            return " ".join(collected)
+    return ""
+
+
+def list_agents() -> list[tuple[str, str]]:
+    """Return (name, description) for each custom agent .md, reflecting reality."""
+    try:
+        files = sorted(f for f in os.listdir(AGENT_DIR) if f.endswith(".md"))
+    except OSError:
+        files = []
+    return [(f[:-3], _agent_description(os.path.join(AGENT_DIR, f))) for f in files]
+
+
+def help_text() -> str:
+    """Plain-text help (renders fine on both WhatsApp and Discord)."""
+    parts = [
+        "I'm a coding/admin bot. Describe a task and I'll route it to the right "
+        "agent automatically.",
+        "",
+        "Custom agents:",
+    ]
+    agents = list_agents()
+    if agents:
+        for name, desc in agents:
+            parts.append(f"• {name}" + (f": {desc}" if desc else ""))
+    else:
+        parts.append("• (none found)")
+    parts += [
+        "",
+        "Examples:",
+        "• parse this to xml: name=Bob, age=30",
+        "• sync this contact to the crm: name=Bob, email=bob@x.com",
+    ]
+    return "\n".join(parts)
+
+
 def handle_message(user_key: str, text: str, file_path: str | None = None,
                    default_agent: str | None = None) -> str:
     """Full turn: load history -> dispatch to OpenCode -> persist -> return reply.
@@ -246,6 +318,10 @@ def handle_message(user_key: str, text: str, file_path: str | None = None,
     in a thread, e.g. `await asyncio.to_thread(core.handle_message, ...)`.
     Returns the untrimmed reply; each adapter trims to its own platform limit.
     """
+    # Help/introspection is answered instantly here — no OpenCode, no model, no timeout.
+    if file_path is None and is_help_command(text):
+        return help_text()
+
     history = load_history(user_key)
     full_prompt = f"{history}\nUser: {text}".strip()
     reply = dispatch(full_prompt, routing_text=text, file_path=file_path,

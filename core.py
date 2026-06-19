@@ -60,7 +60,12 @@ USE_ORCHESTRATOR = os.environ.get("USE_ORCHESTRATOR", "false").lower() == "true"
 #  model=openrouter/free — the double prefix is correct, not a typo.)
 # Still env-overridable if you ever want to pin a specific model.
 MODEL_GENERAL = os.environ.get("MODEL_GENERAL", "openrouter/free")
-MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", MODEL_GENERAL)
+# Structural/agent work needs TOOL USE (e.g. crm-sync-mock runs bash). openrouter/free
+# randomly lands on models with no tool support (image models, etc.) -> "No endpoints
+# found that support tool use". So default this to a free, tool-capable coder model.
+# Other free tool-capable options if congested: openai/gpt-oss-120b:free,
+# qwen/qwen3-next-80b-a3b-instruct:free, meta-llama/llama-3.3-70b-instruct:free.
+MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", "qwen/qwen3-coder:free")
 
 STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
 XML_AGENT_KEYWORDS = ("xml", "parse")
@@ -170,8 +175,17 @@ def run_opencode(
     if file_path:
         prompt += f"\n\nA document is available at: {file_path}\nRead, parse, and handle it."
 
-    # NO_COLOR keeps OpenCode from wrapping output in ANSI escape codes.
-    child_env = {**os.environ, "OPENROUTER_API_KEY": OPENROUTER_API_KEY, "NO_COLOR": "1"}
+    # Point OpenCode at our config + agents EXPLICITLY so they load regardless of
+    # the process's working directory (the bot's cwd isn't guaranteed to be /workspace).
+    # OPENCODE_CONFIG_DIR -> dir containing agent/ ; OPENCODE_CONFIG -> the config file.
+    # NO_COLOR strips ANSI escape codes from output.
+    child_env = {
+        **os.environ,
+        "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+        "NO_COLOR": "1",
+        "OPENCODE_CONFIG_DIR": os.path.join(WORKSPACE_DIR, ".opencode"),
+        "OPENCODE_CONFIG": os.path.join(WORKSPACE_DIR, "opencode.jsonc"),
+    }
 
     # Always pin the model via -m so OpenCode can't wander onto a non-free
     # default; --agent (optional) only layers behaviour/tools on top.

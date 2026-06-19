@@ -63,6 +63,11 @@ and handed to OpenCode.
 - `--dangerously-skip-permissions` is enabled so headless runs don't hang on
   permission prompts. Fine for a trusted PoC; revisit before wider exposure.
 - Free OpenRouter models are rate-limited; the handlers report errors over WhatsApp.
+- **`openrouter/free` does NOT guarantee tool use** — it routes to random free models,
+  some of which (e.g. image models) can't call tools, breaking agents that need `bash`/
+  `edit` (like `crm-sync-mock`). So `MODEL_STRUCTURAL`/agent paths are pinned to a free
+  *tool-capable* model (`qwen/qwen3-coder:free`); only plain chat uses `openrouter/free`.
+  If you enable `USE_ORCHESTRATOR` on free, pin its model to a tool-capable one too.
 
 ## Future Improvements
 

@@ -63,3 +63,99 @@ and handed to OpenCode.
 - `--dangerously-skip-permissions` is enabled so headless runs don't hang on
   permission prompts. Fine for a trusted PoC; revisit before wider exposure.
 - Free OpenRouter models are rate-limited; the handlers report errors over WhatsApp.
+
+## Future Improvements
+
+### Conversation memory (the ladder)
+The bot is **stateless by default** (`HISTORY_ENABLED=false`) — each message is
+self-contained. That's the right default for one-shot "fix this / parse that"
+requests, and it avoids context pollution, token cost, and a flaky DB dependency.
+When memory is actually needed, climb this ladder in order:
+
+1. **Stateless** *(current)* — no DB, no context bloat. Best for task-style requests.
+2. **OpenCode native sessions** *(planned)* — let OpenCode own the context (it trims/
+   summarises intelligently) instead of replaying a raw transcript. Track one
+   session id per conversation and resume with `opencode run --session <id>`.
+   See "How #2 works" below.
+3. **Distilled (PAI-style) memory** *(later, once on paid)* — store extracted *facts/
+   summaries* rather than raw turns (e.g. coding conventions, project context). Most
+   powerful for context quality, but costs extra LLM calls to summarise and is real
+   engineering. **Plan: persist in MongoDB, one document per session-user** (reuse the
+   `user_sessions` collection behind `HISTORY_ENABLED` + `MONGO_URL`), storing the
+   distilled facts/summary instead of the raw transcript. Only build it with a
+   concrete cross-session need.
+
+### How #2 (OpenCode sessions) will work
+- **Get the session id:** run with `opencode run ... --format json`. Output becomes
+  newline-delimited JSON events, each carrying a `sessionID` field (and `text` events
+  carry the reply). Capture the `sessionID` on the first message of a conversation.
+- **Resume it:** on later messages, pass `opencode run --session <id> ...`. Do **NOT**
+  use `--continue` — it resumes the *last* session globally, so in a shared Discord
+  channel one person would hijack another's conversation.
+- **Scope it per conversation (avoids group chaos):** map `sessionID` to a
+  conversation key, recommended in order of cleanliness:
+  - **Per Discord thread** — bot replies in a thread; the thread *is* the conversation.
+    Naturally isolates each person/task. Best UX for a busy channel.
+  - **Per `(channel_id, user_id)`** — each person continues their own thread within a
+    channel. Simpler, but replies interleave in the channel.
+- **Persist the map:** the `key → sessionID` map is tiny. An in-memory dict works but
+  resets on redeploy; for durability use a small store (a Railway volume, or the
+  existing Mongo behind `HISTORY_ENABLED`).
+
+### Tooling (MCPs)
+`opencode.jsonc` ships with `context7` and `github` MCPs defined but `enabled: false`.
+Flip them to `true` (and set `GITHUB_TOKEN`) once on a paid model that handles tools
+well — `github` lets the bot open real PRs; `context7` keeps generated code current.
+`serena` (semantic code edits) is stubbed in comments; it's a local MCP and needs
+`uv`/`uvx` added to the Dockerfile before enabling.
+
+## Going Paid: Migration Playbook
+
+The single source of truth for what to change when moving off the free tier.
+Each step is independent — do them in any order, or only the ones you want.
+
+### 1. Pin paid models (env only, no code change)
+Models are already env-driven in `core.py`. Set on Railway:
+- `MODEL_GENERAL=deepseek/deepseek-v4-flash` — cheap, fast, for chat/understanding.
+- `MODEL_STRUCTURAL=qwen/qwen3-coder-30b-a3b-instruct` — best cost/quality coder for
+  XML/CRM/PR work (~5× cheaper than qwen-2.5-coder and newer).
+- Leaving them unset keeps `openrouter/free` (random free model — unreliable).
+- Rough cost at a few users: **~US$3–25/month**. Skip reasoning models (R1) — their
+  output pricing balloons. Enable provider **prompt caching** to cut agentic-loop cost.
+
+### 2. Turn on the MCPs (config + env)
+In `opencode.jsonc`, flip `"enabled": true` for:
+- `context7` — no secret needed; keeps generated code's API usage current.
+- `github` — set `GITHUB_TOKEN` on Railway; **this is what lets the bot open real PRs.**
+- `serena` (optional) — add `uv` to the Dockerfile (`pip install uv` or the install
+  script), uncomment the block, set `"enabled": true`. Gives semantic code edits.
+- Note: each MCP adds tools = more tokens; paid models handle many tools far better
+  than free ones, which is why this waits for paid.
+
+### 3. Conversation memory #2 — OpenCode sessions (CODE WORK)
+Goal: real multi-turn continuity, scoped per Discord thread (no group cross-talk).
+Implementation, when you say go:
+- In `core.run_opencode`: add `--format json`, and parse the newline-delimited events
+  to extract (a) the assistant reply from `text` events and (b) the `sessionID`.
+- Add a `key → sessionID` map. **Key = Discord thread id** (bot replies in a thread;
+  the thread is the conversation). Fallback key: `(channel_id, user_id)`.
+- First message in a thread: run normally, capture `sessionID`, store it.
+  Later messages: run with `--session <stored id>`. **Never `--continue`** (it grabs
+  the last session globally → cross-user hijacking).
+- Persist the map: start with an in-memory dict (resets on redeploy); for durability
+  use a Railway volume or the Mongo store.
+
+### 4. Conversation memory #3 — distilled PAI-style memory (CODE WORK, later)
+Goal: durable cross-session knowledge (conventions, project facts), not raw transcript.
+Implementation:
+- Set `HISTORY_ENABLED=true` + `MONGO_URL` (re-enables the Mongo connection in `core.py`).
+- **Store one document per session-user in the `user_sessions` collection**, but replace
+  the raw-transcript field with a *distilled summary*: after each turn, run a cheap model
+  (e.g. `deepseek-v4-flash`) to update a short facts/summary blob; inject that blob
+  (not the transcript) into the next prompt.
+- This is the "memory format like PAI" — compact, durable, low context pollution.
+
+### 5. Optional: multi-model per message
+Set `USE_ORCHESTRATOR=true` to route every message through the `orchestrator` agent,
+which delegates to `xml-parser` / `crm-sync-mock` subagents (each can use its own model).
+More model calls; only worth it on paid.

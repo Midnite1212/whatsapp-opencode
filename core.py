@@ -30,8 +30,14 @@ from pymongo import MongoClient
 # ---------------------------------------------------------------------------
 # Configuration (env-driven; nothing sensitive is hardcoded)
 # ---------------------------------------------------------------------------
-MONGO_URL = os.environ["MONGO_URL"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+
+# Conversation memory is OFF by default. Most "fix this" requests are self-contained,
+# and replaying a growing transcript pollutes the context window, costs tokens, and
+# (on Railway's dynamic IPs) makes MongoDB a flaky hard dependency. Turn it on only
+# if you actually need multi-turn continuity: HISTORY_ENABLED=true (+ MONGO_URL).
+HISTORY_ENABLED = os.environ.get("HISTORY_ENABLED", "false").lower() == "true"
+MONGO_URL = os.environ.get("MONGO_URL")  # only required when HISTORY_ENABLED
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "/workspace")
 DOWNLOADS_DIR = os.path.join(WORKSPACE_DIR, "downloads")
@@ -61,11 +67,16 @@ XML_AGENT_KEYWORDS = ("xml", "parse")
 CRM_AGENT_KEYWORDS = ("crm", "sync", "api", "post")
 
 # ---------------------------------------------------------------------------
-# Database
+# Database — only connected when history is enabled; otherwise the bot is fully
+# stateless and has NO MongoDB dependency (nothing to fail on Railway).
 # ---------------------------------------------------------------------------
-mongo = MongoClient(MONGO_URL)
-db = mongo.get_default_database(default="whatsapp_opencode")
-sessions = db["user_sessions"]
+sessions = None
+if HISTORY_ENABLED:
+    if not MONGO_URL:
+        raise RuntimeError("HISTORY_ENABLED=true but MONGO_URL is not set")
+    mongo = MongoClient(MONGO_URL)
+    db = mongo.get_default_database(default="whatsapp_opencode")
+    sessions = db["user_sessions"]
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +110,8 @@ def route_agent_automatically(user_prompt: str) -> str | None:
 # ---------------------------------------------------------------------------
 def load_history(user_key: str) -> str:
     """Return the user's cumulative chat history, resetting it if stale (>24h)."""
+    if sessions is None:           # history disabled -> stateless
+        return ""
     doc = sessions.find_one({"user_id": user_key})
     if not doc:
         return ""
@@ -119,6 +132,8 @@ def load_history(user_key: str) -> str:
 
 def append_history(user_key: str, user_text: str, agent_text: str) -> None:
     """Append this turn to the user's history and persist it."""
+    if sessions is None:           # history disabled -> nothing to persist
+        return
     doc = sessions.find_one({"user_id": user_key})
     prior = doc.get("chat_history", "") if doc else ""
     updated = f"{prior}\nUser: {user_text}\nAssistant: {agent_text}".strip()

@@ -40,7 +40,7 @@ COPY server.py core.py discord_bot.py ./
 # OpenCode reads AGENTS.md, opencode.json, and .opencode/agent/*.md from its
 # working directory. We run OpenCode inside /workspace, so they must live there.
 COPY AGENTS.md /workspace/AGENTS.md
-COPY opencode.json /workspace/opencode.json
+COPY opencode.jsonc /workspace/opencode.jsonc
 COPY .opencode /workspace/.opencode
 
 # Isolated, writable location for inbound WhatsApp documents.

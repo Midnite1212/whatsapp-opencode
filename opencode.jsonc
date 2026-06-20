@@ -53,7 +53,7 @@
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer {env:GITHUB_TOKEN}" },
-      "enabled": true
+      "enabled": false
     }
     // TODO: Flip once in the paid stream — semantic code nav/edit via LSP → more accurate tweaks.
     // Local MCP: needs `uv`/`uvx` added to the Dockerfile first (not installed yet).

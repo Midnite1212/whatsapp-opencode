@@ -9,12 +9,12 @@
     // Self-hosted LLM (OpenAI-compatible: Ollama .../v1, LM Studio .../v1,
     // KoboldCpp .../v1). baseURL comes from LOCAL_LLM_URL (must be a PUBLIC tunnel
     // url, not localhost, since the bot runs on Railway).
-    // BY DEFAULT (LOCAL_LLM_MODEL=auto) the bot discovers whatever model your server
-    // is serving and sends that exact id — you don't need to touch the keys below.
-    // The `-m local/<id>` flag carries the real model id regardless of this list.
-    // ONLY edit this if you want per-task routing: list your model keys (e.g.
-    // "gemma3:27b", "qwen2.5-coder:32b") and set LOCAL_LLM_MODEL (general) +
-    // LOCAL_LLM_MODEL_STRUCTURAL (coding/tools) to match.
+    // IMPORTANT: OpenCode only accepts model ids that are LISTED under "models"
+    // below. Get your exact ids from `GET /v1/models` on your server, list each one
+    // here, and point LOCAL_LLM_MODEL (general) + LOCAL_LLM_MODEL_STRUCTURAL
+    // (coding/tools) at them. (LOCAL_LLM_MODEL=auto only works if the discovered model
+    // is also listed here.) The examples below are this project's current models —
+    // change them to yours.
     "local": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Local LLM",
@@ -26,8 +26,10 @@
         "headers": { "ngrok-skip-browser-warning": "true" }
       },
       "models": {
-        "local-model": {},
-        "local-coder": {}
+        // limit.output caps the reserved response size (OpenCode otherwise asks for
+        // ~32k, which overflows small windows). limit.context must be <= the context
+        // you load the model with in LM Studio. Raise both if your VRAM allows.
+        "qwen/qwen3.6-27b": { "limit": { "context": 24576, "output": 4096 } }
       }
     }
   },

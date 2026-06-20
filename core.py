@@ -191,6 +191,16 @@ def append_history(user_key: str, user_text: str, agent_text: str) -> None:
 # ---------------------------------------------------------------------------
 # Model selection: local LLM first (if reachable), else OpenRouter
 # ---------------------------------------------------------------------------
+def _local_base_url() -> str:
+    """LOCAL_LLM_URL normalized to end with /v1 — OpenAI-compatible servers (Ollama,
+    LM Studio, KoboldCpp) expose the API under /v1, and forgetting it is the #1 setup
+    mistake (POST hits /chat/completions -> 'unexpected endpoint' -> empty reply)."""
+    base = (LOCAL_LLM_URL or "").rstrip("/")
+    if base and not base.endswith("/v1"):
+        base += "/v1"
+    return base
+
+
 def local_llm_up() -> bool:
     """Is the self-hosted LLM reachable? Cached for LOCAL_LLM_HEALTH_TTL seconds so
     we don't ping it on every message. Any HTTP response (even 401/404) counts as
@@ -204,7 +214,7 @@ def local_llm_up() -> bool:
     model = None
     try:
         req = urllib.request.Request(
-            LOCAL_LLM_URL.rstrip("/") + "/models",
+            _local_base_url() + "/models",
             headers={
                 "Authorization": f"Bearer {LOCAL_LLM_API_KEY}",
                 # ngrok free tier injects an HTML interstitial without this header,
@@ -216,9 +226,12 @@ def local_llm_up() -> bool:
             up = True
             try:                          # discover the served model id for "auto"
                 data = json.loads(resp.read().decode("utf-8"))
-                served = data.get("data") or []
-                if served:
-                    model = served[0].get("id")
+                ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
+                # Skip embedding models — they can't do chat/agent work. Picks the
+                # first remaining model (load just ONE chat model for predictable auto,
+                # or set LOCAL_LLM_MODEL explicitly when several are loaded).
+                ids = [i for i in ids if "embed" not in i.lower()]
+                model = ids[0] if ids else None
             except Exception:
                 model = None
     except urllib.error.HTTPError:
@@ -277,6 +290,9 @@ def run_opencode(
     child_env = {
         **os.environ,
         "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+        # Hand OpenCode the /v1-normalized URL so its provider baseURL is correct
+        # even if LOCAL_LLM_URL was set without /v1.
+        "LOCAL_LLM_URL": _local_base_url(),
         "LOCAL_LLM_API_KEY": LOCAL_LLM_API_KEY,  # consumed by opencode.jsonc {env:...}
         "NO_COLOR": "1",
         "OPENCODE_CONFIG_DIR": os.path.join(WORKSPACE_DIR, ".opencode"),

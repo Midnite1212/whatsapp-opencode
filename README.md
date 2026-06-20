@@ -114,6 +114,73 @@ well — `github` lets the bot open real PRs; `context7` keeps generated code cu
 `serena` (semantic code edits) is stubbed in comments; it's a local MCP and needs
 `uv`/`uvx` added to the Dockerfile before enabling.
 
+### Local LLM (self-hosted) — implemented, opt-in
+Use your own machine's LLM (e.g. Ollama / LM Studio) instead of OpenRouter, with
+**automatic fallback to OpenRouter when your machine is unreachable**. The bot health-
+checks your local endpoint (cached 30s) and routes accordingly.
+
+**Hard requirement:** the bot runs on Railway (cloud), so it **cannot** reach
+`localhost`/your home IP. Expose your local server through a **tunnel** and use that
+public URL:
+- Cloudflare Tunnel: `cloudflared tunnel --url http://localhost:11434` → gives an
+  `https://….trycloudflare.com` URL.
+- or ngrok / Tailscale Funnel.
+
+**Setup:**
+1. Run an OpenAI-compatible server locally (Ollama `http://localhost:11434/v1`;
+   LM Studio `http://localhost:1234/v1`; **KoboldCpp `http://localhost:5001/v1`**).
+   Note on model choice: general chat + `xml-parser` work on most models (e.g.
+   Gemma 4), but the **`crm-sync-mock`/agent paths need reliable tool-calling** —
+   Gemma's is weak/inconsistent, so use a tool-capable coder (e.g. `qwen2.5-coder`)
+   for those, or let them fall back to cloud.
+2. Start a tunnel to it; note the public URL.
+3. In `opencode.jsonc`, rename the `provider.local.models` key from `local-model` to
+   your served model name.
+4. Set Railway env vars:
+   - `LOCAL_LLM_URL` = `https://<tunnel-host>/v1`  (must end in `/v1`)
+   - `LOCAL_LLM_MODEL` = general/chat/parsing model (matches a key in step 3)
+   - `LOCAL_LLM_MODEL_STRUCTURAL` = coding/tools model (defaults to `LOCAL_LLM_MODEL`)
+   - `LOCAL_LLM_API_KEY` = anything (most local servers ignore it)
+5. Deploy. When your machine + tunnel are up, messages use the local models (general
+   vs coding routed automatically); when they're down, the bot silently falls back to
+   OpenRouter.
+
+**Multiple local models:** use a server that serves many models from one endpoint —
+**Ollama** (CLI; hot-swaps on demand) or **LM Studio** (GUI; enable *JIT model loading*).
+KoboldCpp is one model per process, so it's not ideal for this. Get each model's exact
+identifier — Ollama: `ollama pull <model>` then `ollama list` (e.g. `gemma3:27b`,
+`qwen2.5-coder:32b`); LM Studio: the model id shown in the app (e.g.
+`google/gemma-3-27b`). Use that exact string as both the key under
+`provider.local.models` in `opencode.jsonc` AND the env var value. Point
+`LOCAL_LLM_MODEL` at your general/parsing model (e.g. a Gemma) and
+`LOCAL_LLM_MODEL_STRUCTURAL` at your code/tools model (e.g. a Qwen-coder). VRAM note:
+a 24GB GPU holds ~one 27–32B model at a time,
+so Ollama swaps them per request (a few seconds on switch) — don't expect two big
+models resident at once. DeepSeek V4 is too large for 24GB; keep it as a cloud
+(OpenRouter) option, not local.
+
+**Caveats:** home upload bandwidth adds latency per turn; agent paths needing tools
+require a tool-capable local model; on first local use OpenCode fetches the
+`@ai-sdk/openai-compatible` provider package (one-time, needs network). Each reply is
+tagged "— via local LLM" or "— via OpenRouter (cloud)" so you can see which backend
+answered (toggle with `SHOW_MODEL_SOURCE=false`).
+
+### Organization knowledge base / specialized model
+Give the bot Bowtie-/org-specific knowledge (product facts, coding conventions, API
+schemas, past decisions) so it answers more specifically **and uses fewer tokens** —
+instead of stuffing context into every prompt, it retrieves only the relevant pieces.
+Options, roughly increasing effort:
+- **RAG over a vector store** — index org docs/code into a vector DB; on each request
+  retrieve the top-k relevant chunks and inject just those. Cheapest path to
+  specificity + token savings. Can be wired as an MCP so OpenCode queries it as a tool.
+- **A dedicated knowledge MCP** — expose the knowledge base as an MCP server (like
+  `context7` but for *your* docs); the agent pulls facts on demand.
+- **A fine-tuned / domain-specialized small model** — fine-tune a small local model on
+  org data for a specialised, cheap, fast model handling the common cases, falling back
+  to a larger model for the rest. Most effort; best token economics at scale.
+- Pairs naturally with memory tier #3 (distilled facts in Mongo) — the knowledge base
+  is the *static* org knowledge; #3 is the *per-user* learned context.
+
 ## Going Paid: Migration Playbook
 
 The single source of truth for what to change when moving off the free tier.

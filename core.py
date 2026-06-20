@@ -13,6 +13,8 @@ Secrets come from environment variables:
 import os
 import re
 import subprocess
+import time
+import urllib.request
 from datetime import datetime, timezone, timedelta
 
 # Strips ANSI escape sequences (colour codes) from OpenCode's terminal output.
@@ -72,6 +74,29 @@ STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
 XML_AGENT_KEYWORDS = ("xml", "parse")
 CRM_AGENT_KEYWORDS = ("crm", "sync", "api", "post")
 
+# --- Local LLM (self-hosted on your own PC) ---------------------------------
+# When LOCAL_LLM_URL is set AND reachable, use your local model for everything;
+# otherwise fall back to OpenRouter automatically. Because the bot runs on Railway
+# (cloud), LOCAL_LLM_URL must be a PUBLIC url to your machine — a tunnel like
+# Cloudflare Tunnel / ngrok / Tailscale — not http://localhost. It must point at an
+# OpenAI-compatible endpoint ending in /v1 (Ollama: .../v1, LM Studio: .../v1).
+# LOCAL_LLM_MODEL must match the model key declared under provider "local" in
+# opencode.jsonc.
+LOCAL_LLM_URL = os.environ.get("LOCAL_LLM_URL")              # e.g. https://abc.trycloudflare.com/v1
+# Two local models, routed by task (same split as the OpenRouter models). Use one
+# endpoint that serves multiple models (Ollama) and name them here. They must match
+# model keys under provider "local" in opencode.jsonc.
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "local-model")            # general / chat / parsing
+LOCAL_LLM_MODEL_STRUCTURAL = os.environ.get("LOCAL_LLM_MODEL_STRUCTURAL", LOCAL_LLM_MODEL)  # coding / tools
+LOCAL_LLM_API_KEY = os.environ.get("LOCAL_LLM_API_KEY", "local")  # most local servers ignore this
+LOCAL_LLM_HEALTH_TTL = int(os.environ.get("LOCAL_LLM_HEALTH_TTL", "30"))  # cache up/down (seconds)
+
+_local_health = {"checked_at": 0.0, "up": False}
+
+# Append a small "— via local LLM / OpenRouter (cloud)" tag to each reply so you can
+# see which backend answered. Set SHOW_MODEL_SOURCE=false to hide it.
+SHOW_MODEL_SOURCE = os.environ.get("SHOW_MODEL_SOURCE", "true").lower() == "true"
+
 # ---------------------------------------------------------------------------
 # Database — only connected when history is enabled; otherwise the bot is fully
 # stateless and has NO MongoDB dependency (nothing to fail on Railway).
@@ -88,12 +113,15 @@ if HISTORY_ENABLED:
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
+def _is_structural(text: str) -> bool:
+    """Does the message imply structural/coding/tool work (vs general chat)?"""
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in STRUCTURAL_KEYWORDS)
+
+
 def route_model_automatically(user_prompt: str) -> str:
-    """Pick an OpenRouter model: Gemini for structured work, Llama otherwise."""
-    lowered = user_prompt.lower()
-    if any(keyword in lowered for keyword in STRUCTURAL_KEYWORDS):
-        return MODEL_STRUCTURAL
-    return MODEL_GENERAL
+    """Pick the OpenRouter model slug: structural model for code/parse, general otherwise."""
+    return MODEL_STRUCTURAL if _is_structural(user_prompt) else MODEL_GENERAL
 
 
 def route_agent_automatically(user_prompt: str) -> str | None:
@@ -157,19 +185,60 @@ def append_history(user_key: str, user_text: str, agent_text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Model selection: local LLM first (if reachable), else OpenRouter
+# ---------------------------------------------------------------------------
+def local_llm_up() -> bool:
+    """Is the self-hosted LLM reachable? Cached for LOCAL_LLM_HEALTH_TTL seconds so
+    we don't ping it on every message. Any HTTP response (even 401/404) counts as
+    'reachable'; only connection errors/timeouts count as down."""
+    if not LOCAL_LLM_URL:
+        return False
+    now = time.time()
+    if now - _local_health["checked_at"] < LOCAL_LLM_HEALTH_TTL:
+        return _local_health["up"]
+    up = False
+    try:
+        req = urllib.request.Request(
+            LOCAL_LLM_URL.rstrip("/") + "/models",
+            headers={"Authorization": f"Bearer {LOCAL_LLM_API_KEY}"},
+        )
+        urllib.request.urlopen(req, timeout=4)
+        up = True
+    except urllib.error.HTTPError:
+        up = True       # server responded (just not 200) -> it's reachable
+    except Exception:
+        up = False      # connection refused / DNS / timeout -> down
+    _local_health.update(checked_at=now, up=up)
+    return up
+
+
+def opencode_model_for(structural: bool) -> str:
+    """Full OpenCode model string for this task tier. Prefer the local LLM when
+    reachable (per-tier local model), otherwise fall back to OpenRouter (per-tier slug)."""
+    if local_llm_up():
+        return f"local/{LOCAL_LLM_MODEL_STRUCTURAL if structural else LOCAL_LLM_MODEL}"
+    return f"openrouter/{MODEL_STRUCTURAL if structural else MODEL_GENERAL}"
+
+
+def model_source_label() -> str:
+    """Human-readable backend in use right now (uses the cached health check)."""
+    return "local LLM" if local_llm_up() else "OpenRouter (cloud)"
+
+
+# ---------------------------------------------------------------------------
 # OpenCode execution
 # ---------------------------------------------------------------------------
 def run_opencode(
     history_and_prompt: str,
-    model_id: str | None = None,
+    model: str | None = None,
     agent: str | None = None,
     file_path: str | None = None,
 ) -> str:
     """Run OpenCode headlessly (`opencode run`) and return its stdout.
 
-    `model_id` (env-driven, `MODEL_GENERAL` default) is always pinned via
-    `-m openrouter/<model>` so OpenCode can't fall back to a non-free default.
-    `agent` optionally layers behaviour/tools on top. Auth uses OPENROUTER_API_KEY.
+    `model` is the FULL OpenCode model string (`provider/model`, e.g.
+    `openrouter/openrouter/free` or `local/<model>`) — pinned via `-m` so OpenCode
+    can't wander onto a default. `agent` optionally layers behaviour/tools on top.
     `--dangerously-skip-permissions` stops headless hangs on permission prompts.
     """
     prompt = history_and_prompt
@@ -183,14 +252,15 @@ def run_opencode(
     child_env = {
         **os.environ,
         "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+        "LOCAL_LLM_API_KEY": LOCAL_LLM_API_KEY,  # consumed by opencode.jsonc {env:...}
         "NO_COLOR": "1",
         "OPENCODE_CONFIG_DIR": os.path.join(WORKSPACE_DIR, ".opencode"),
         "OPENCODE_CONFIG": os.path.join(WORKSPACE_DIR, "opencode.jsonc"),
     }
 
-    # Always pin the model via -m so OpenCode can't wander onto a non-free
-    # default; --agent (optional) only layers behaviour/tools on top.
-    cmd = ["opencode", "run", prompt, "-m", f"openrouter/{model_id or MODEL_GENERAL}"]
+    # Pin the model via -m so OpenCode can't wander onto a default; --agent
+    # (optional) only layers behaviour/tools on top.
+    cmd = ["opencode", "run", prompt, "-m", model or opencode_model_for(MODEL_GENERAL)]
     if agent:
         cmd += ["--agent", agent]
     cmd += ["--dangerously-skip-permissions"]
@@ -222,18 +292,17 @@ def run_opencode(
 
     return _clean(result.stdout) or "(OpenCode produced no output.)"
 
-# TODO: Consider adding local LLM model for basic conversations, to speed up simple chats and save OpenRouter calls for heavier lifting.
 def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
              default_agent: str | None = None) -> str:
-    """Decide how a message is run and run it. One env-driven model is always
-    pinned; routing only picks an optional specialist agent on top."""
-    model_id = route_model_automatically(routing_text)
+    """Decide how a message is run and run it. Picks local-LLM-or-OpenRouter for the
+    model, and an optional specialist agent on top."""
+    model = opencode_model_for(_is_structural(routing_text))
     if USE_ORCHESTRATOR:
-        return run_opencode(full_prompt, model_id=model_id, agent="orchestrator",
+        return run_opencode(full_prompt, model=model, agent="orchestrator",
                             file_path=file_path)
 
     agent = route_agent_automatically(routing_text) or default_agent
-    return run_opencode(full_prompt, model_id=model_id, agent=agent, file_path=file_path)
+    return run_opencode(full_prompt, model=model, agent=agent, file_path=file_path)
 
 
 # ---------------------------------------------------------------------------
@@ -326,5 +395,7 @@ def handle_message(user_key: str, text: str, file_path: str | None = None,
     full_prompt = f"{history}\nUser: {text}".strip()
     reply = dispatch(full_prompt, routing_text=text, file_path=file_path,
                      default_agent=default_agent)
-    append_history(user_key, text, reply)
+    append_history(user_key, text, reply)  # store the clean reply, without the tag
+    if SHOW_MODEL_SOURCE:
+        reply = f"{reply}\n\n— via {model_source_label()}"
     return reply

@@ -5,6 +5,26 @@
       "options": {
         "apiKey": "{env:OPENROUTER_API_KEY}"
       }
+    },
+    // Self-hosted LLM (OpenAI-compatible: Ollama .../v1, LM Studio .../v1,
+    // KoboldCpp .../v1). baseURL comes from LOCAL_LLM_URL (must be a PUBLIC tunnel
+    // url, not localhost, since the bot runs on Railway).
+    // For MULTIPLE local models, use ONE endpoint that serves many (Ollama) and list
+    // each model key here, then point LOCAL_LLM_MODEL (general) and
+    // LOCAL_LLM_MODEL_STRUCTURAL (coding/tools) at the matching keys.
+    // Rename these keys to your EXACT Ollama model names (run `ollama list`),
+    // e.g. "gemma3:27b" (general) and "qwen2.5-coder:32b" (coding/tools).
+    "local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local LLM",
+      "options": {
+        "baseURL": "{env:LOCAL_LLM_URL}",
+        "apiKey": "{env:LOCAL_LLM_API_KEY}"
+      },
+      "models": {
+        "local-model": {},
+        "local-coder": {}
+      }
     }
   },
   "mcp": {

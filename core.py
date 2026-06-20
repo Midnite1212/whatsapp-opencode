@@ -71,11 +71,18 @@ MODEL_GENERAL = os.environ.get("MODEL_GENERAL", "openrouter/free")
 # qwen/qwen3-next-80b-a3b-instruct:free, meta-llama/llama-3.3-70b-instruct:free.
 MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", "openrouter/free")
 
-STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
+STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document", "sermon", "tiptap")
+# Sermon docs -> the bash-capable sermon-notes agent (it unzips the .docx to read which
+# runs are highlighted). Checked BEFORE xml-parser, since "parse this sermon" also matches
+# the XML keywords but should use the sermon skill, not the generic XML parser.
+SERMON_KEYWORDS = ("sermon", "tiptap")
 XML_AGENT_KEYWORDS = ("xml", "parse")
 # Real authenticated org-API calls (OAuth client-credentials) -> org-api agent.
 # (crm-sync-mock.md is kept for offline mock testing; invoke it explicitly if needed.)
 ORG_API_KEYWORDS = ("crm", "sync", "api", "post", "submit", "upload", "send to")
+
+# Where a converted sermon-notes JSON is POSTed (relative to ORG_API_BASE_URL).
+ORG_SERMON_CREATE_PATH = os.environ.get("ORG_SERMON_CREATE_PATH", "/api/sermon-notes-parent/create")
 
 # --- Local LLM (self-hosted on your own PC) ---------------------------------
 # When LOCAL_LLM_URL is set AND reachable, use your local model for everything;
@@ -147,6 +154,8 @@ def route_agent_automatically(user_prompt: str) -> str | None:
     markdown — so model selection for specialised work lives in one place.
     """
     lowered = user_prompt.lower()
+    if any(keyword in lowered for keyword in SERMON_KEYWORDS):
+        return "sermon-notes"
     if any(keyword in lowered for keyword in XML_AGENT_KEYWORDS):
         return "xml-parser"
     if any(keyword in lowered for keyword in ORG_API_KEYWORDS):
@@ -385,6 +394,65 @@ def run_opencode(
 
     return _clean(result.stdout) or "(OpenCode produced no output.)"
 
+def _extract_json_object(text: str) -> str | None:
+    """Pull the outermost {...} JSON object out of model output and validate it parses.
+
+    The sermon-notes skill is told to emit JSON only, but a free model may still wrap it
+    in prose or a ```json fence. We slice from the first '{' to the last '}' and confirm
+    it's valid JSON, so the submit step never POSTs garbage. Returns None if not found.
+    """
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    blob = text[start:end + 1]
+    try:
+        json.loads(blob)
+    except ValueError:
+        return None
+    return blob
+
+
+def run_sermon_pipeline(full_prompt: str, model: str, file_path: str | None = None) -> str:
+    """Chain two agents: sermon-notes converts the doc -> sermon JSON, then org-api
+    authenticates and POSTs it to the org's create endpoint.
+
+    The JSON is handed off via a FILE, not re-typed through a model: a big payload sent
+    back through a free model's prompt would risk truncation/mangling. org-api just curls
+    the file verbatim.
+    """
+    # 1) Convert the document to sermon-notes JSON.
+    raw = run_opencode(full_prompt, model=model, agent="sermon-notes", file_path=file_path)
+    blob = _extract_json_object(raw)
+    if not blob:
+        # No valid JSON to submit — surface the conversion output so the failure is visible.
+        return ("⚠️ Couldn't produce valid sermon JSON to submit, so nothing was posted. "
+                f"Conversion output was:\n{raw}")
+
+    # 2) Persist the payload for a clean handoff (unique name avoids concurrent collisions).
+    payload_path = os.path.join(DOWNLOADS_DIR, f"sermon_payload_{int(time.time() * 1000)}.json")
+    with open(payload_path, "w", encoding="utf-8") as fh:
+        fh.write(blob)
+
+    # 3) Submit via org-api: authenticate, then POST the file's contents verbatim.
+    try:
+        submit_prompt = (
+            "Submit a sermon note to the org system.\n"
+            f"The JSON payload is in this file: {payload_path}\n"
+            "Authenticate as the machine-user, then POST that file's contents as the JSON body to "
+            f"`$ORG_API_BASE_URL{ORG_SERMON_CREATE_PATH}` with header `Content-Type: application/json`. "
+            f"Send the body verbatim with `curl --data @{payload_path}` — do NOT retype the JSON. "
+            "Report the HTTP status; on success include the created sermonId. A 409 means a sermon "
+            "with that sermonId already exists."
+        )
+        return run_opencode(submit_prompt, model=model, agent="org-api")
+    finally:
+        # Don't leave sermon content sitting in the downloads dir.
+        try:
+            os.remove(payload_path)
+        except OSError:
+            pass
+
+
 def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
              default_agent: str | None = None) -> str:
     """Decide how a message is run and run it. Picks local-LLM-or-OpenRouter for the
@@ -395,6 +463,9 @@ def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
                             file_path=file_path)
 
     agent = route_agent_automatically(routing_text) or default_agent
+    # Sermon docs are a two-step chain (convert -> submit), not a single agent run.
+    if agent == "sermon-notes":
+        return run_sermon_pipeline(full_prompt, model=model, file_path=file_path)
     return run_opencode(full_prompt, model=model, agent=agent, file_path=file_path)
 
 

@@ -108,14 +108,18 @@ endpoints. Set on Railway:
 - `ORG_LOGIN_URL` — the login endpoint, i.e. `<base>/api/auth/login`
 - `ORG_USERNAME` — the machine-user **email** (sent as the `emailAddress` field)
 - `ORG_PASSWORD` — its password
+- `ORG_SERMON_CREATE_PATH` — optional; sermon create path (default `/api/sermon-notes-parent/create`)
 
 Flow (verified against the org's Sails backend):
 `POST /api/auth/login` with `{ emailAddress, password }` → the **response body is the
 raw JWT string** (not `{token: …}`) → send it on every call as the header
 **`Authorisation: Bearer <jwt>`**. ⚠️ Note the **British spelling `Authorisation`**
 (with an "s") and the literal `Bearer` scheme — the server rejects the standard
-`Authorization` (with a "z") with a 401. The payload comes from the document-processing
-step (doc → sermon-notes JSON). (`crm-sync-mock.md` remains for offline mock testing.)
+`Authorization` (with a "z") with a 401. (`crm-sync-mock.md` remains for offline mock testing.)
+
+Sermon submission is wired end-to-end: the converted sermon-notes JSON is POSTed to
+**`$ORG_API_BASE_URL/api/sermon-notes-parent/create`** (the body is the JSON object
+as-is; a duplicate `sermonId` returns `409`).
 
 Security note: a machine user with a password is a bigger blast radius than scoped
 client credentials — keep it least-privilege, MFA-exempt (so login isn't blocked),
@@ -139,7 +143,11 @@ First skill: **`sermon-notes-parser`** — converts a sermon-prep doc (`.docx`) 
 sermon-notes JSON (tiptap `originalContent` + metadata). The full mapping lives in its
 `SKILL.md`, with a worked example in `reference.json`. Runs via the bash-capable
 **`sermon-notes`** agent (it unzips the `.docx` to read which runs are highlighted).
-End-to-end target: receive notes → `sermon-notes-parser` (convert) → `org-api` (submit).
+End-to-end (implemented, auto-submit): a sermon doc routes to the `sermon-notes` agent,
+and `core.run_sermon_pipeline` chains the two steps — `sermon-notes-parser` converts the
+doc → JSON, the JSON is handed to `org-api` via a file (so a big payload isn't re-typed
+through the model), and `org-api` POSTs it to the create endpoint and replies with the
+status.
 
 ## Future Improvements
 

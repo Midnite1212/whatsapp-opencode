@@ -1,0 +1,266 @@
+{
+  "_comment": "Worked example: the 'Re:Imagine - Part 1' prep doc -> the JSON this skill emits. UUIDs are illustrative (generate fresh ones). _id/createdAt/updatedAt are intentionally absent (MongoDB adds them). isDeleted/isPublished are always false.",
+  "sermonId": "sn-10052026-1",
+  "title": "Re:Imagine - Part 1",
+  "subtitle": "",
+  "speaker": "Pastor Intern Peter Young",
+  "sermonSeries": "Re:Imagine",
+  "date": "2026-05-10",
+  "imageLink": "https://hongkong.sub.hmccglobal.org/wp-content/uploads/reimagine_sn.png",
+  "originalContent": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [
+          { "type": "bibleVerse", "attrs": { "bibleVerse": "John 5:1-17", "actionText": "READ" } },
+          { "type": "text", "marks": [ { "type": "bold" } ], "text": "\n" }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [ { "type": "text", "marks": [ { "type": "bold" } ], "text": "INTRODUCTION" } ]
+      },
+      {
+        "type": "paragraph",
+        "content": [ { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "What we hope to see for our church:" } ]
+      },
+      {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Grow to be more " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "MATURE", "userText": "", "currentId": "edb60e5e-f353-4986-bb4c-ca2103b676f3" } }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Reignite our " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "PASSION", "userText": "", "currentId": "214898a1-5cdf-4a68-8248-d5600a6827d6" } }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Increase our " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "FAITH", "userText": "", "currentId": "0e810f52-874f-4ad7-90ae-d702de3483cb" } }
+                ]
+              },
+              { "type": "userNotes", "attrs": { "userNotes": null, "id": null } }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [ { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "There will be 3 sections to Re:Imagine:" } ]
+      },
+      {
+        "type": "orderedList",
+        "attrs": { "start": 1 },
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Re:Imagine - " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "Purpose", "userText": "", "currentId": "e1da587f-a853-4a04-a62a-5d424fd99385" } }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Re:Imagine - " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "Practices ", "userText": "", "currentId": "73b03acf-74bc-40c8-b1f1-3b73d310286d" } },
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "& " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "Relationship", "userText": "", "currentId": "88d8ce69-615f-4741-a6fc-fc45c2045508" } }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "Re:Imagine - " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "Places", "userText": "", "currentId": "b09d6fb0-f119-4cdc-9fac-1aa2780cd5c9" } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": { "level": 1 },
+        "content": [
+          { "type": "text", "text": "The One Thing: God works beyond our " },
+          { "type": "fillInBlank", "attrs": { "editorText": "limitations ", "userText": "", "currentId": "27eca985-88c8-4601-8e12-5753858c0836" } },
+          { "type": "text", "text": "and " },
+          { "type": "fillInBlank", "attrs": { "editorText": "expectations", "userText": "", "currentId": "b17335fb-352e-42ca-b9ec-18aa2218892f" } }
+        ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "ef715e15-020a-452c-9174-418364d70847" } },
+      { "type": "paragraph" },
+      {
+        "type": "heading",
+        "attrs": { "level": 2 },
+        "content": [
+          { "type": "text", "text": "I. The sick " },
+          { "type": "fillInBlank", "attrs": { "editorText": "man", "userText": "", "currentId": "81abaac7-9623-46c3-8cce-c359e1ba02e6" } }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": { "level": 3 },
+        "content": [
+          { "type": "text", "text": "A. His " },
+          { "type": "fillInBlank", "attrs": { "editorText": "limitations", "userText": "", "currentId": "2b711b97-e630-43b8-bbd4-763000ac8e21" } }
+        ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "a5cc3b61-27a5-4d2d-9226-2e3285d9743f" } },
+      {
+        "type": "heading",
+        "attrs": { "level": 3 },
+        "content": [
+          { "type": "text", "text": "B. His " },
+          { "type": "fillInBlank", "attrs": { "editorText": "expectations", "userText": "", "currentId": "9398f52d-c415-4d2f-a415-3fab4e558cad" } }
+        ]
+      },
+      {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "marks": [ { "type": "bold" } ], "text": "A.W. Tozer" },
+                  { "type": "text", "text": ", a well known pastor and Christian author once said, \"The God of the modern evangelical rarely astonishes anybody. He manages to stay pretty much with the constitution... He's a very well-behaved God and very denominational and very much one of us.\"" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "4d614803-103c-4f78-823f-8fc1b95bb53d" } },
+      {
+        "type": "heading",
+        "attrs": { "level": 2 },
+        "content": [
+          { "type": "text", "text": "II. The " },
+          { "type": "fillInBlank", "attrs": { "editorText": "Pharisees", "userText": "", "currentId": "735093b6-7c84-4099-b4ae-0a258db4e687" } }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": { "level": 3 },
+        "content": [
+          { "type": "text", "text": "A. Their " },
+          { "type": "fillInBlank", "attrs": { "editorText": "response", "userText": "", "currentId": "c438a2be-9a75-414f-a0f0-495dcbdc312c" } }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          { "type": "bibleVerse", "attrs": { "bibleVerse": "Mark 3:1-6", "actionText": "READ" } },
+          { "type": "text", "marks": [ { "type": "bold" } ], "text": " " },
+          { "type": "bibleVerse", "attrs": { "bibleVerse": "Mark 7:1-8", "actionText": "READ" } }
+        ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "18de6deb-2f75-4f9d-9046-9924dff2e197" } },
+      {
+        "type": "heading",
+        "attrs": { "level": 2 },
+        "content": [
+          { "type": "text", "text": "III. " },
+          { "type": "fillInBlank", "attrs": { "editorText": "Jesus", "userText": "", "currentId": "d525f563-7330-4cfc-b65a-914fe6ec5df2" } }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": { "level": 3 },
+        "content": [ { "type": "text", "text": "A. He sees" } ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "4fb7f7c5-224e-4413-a7fb-08d487af1306" } },
+      {
+        "type": "heading",
+        "attrs": { "level": 3 },
+        "content": [ { "type": "text", "text": "B. He works" } ]
+      },
+      { "type": "userNotes", "attrs": { "userNotes": null, "id": "8d0ceedb-6bbd-4fe0-a5d3-6e4d3e394500" } },
+      {
+        "type": "heading",
+        "attrs": { "level": 2 },
+        "content": [ { "type": "text", "text": "The One Thing: God works beyond our limitations and expectations" } ]
+      },
+      {
+        "type": "paragraph",
+        "content": [ { "type": "text", "marks": [ { "type": "bold" } ], "text": "NEXT STEPS:" } ]
+      },
+      {
+        "type": "orderedList",
+        "attrs": { "start": 1 },
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "fillInBlank", "attrs": { "editorText": "Surrender ", "userText": "", "currentId": "07e14ef5-7de2-4db7-929c-2800b13f7b5c" } },
+                  { "type": "text", "marks": [ { "type": "textStyle", "attrs": { "fontSize": "11pt" } } ], "text": "your preconceived notions" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "Ask God for " },
+                  { "type": "fillInBlank", "attrs": { "editorText": "faith", "userText": "", "currentId": "cff2a418-d824-4acc-8bd7-b769083750da" } }
+                ]
+              },
+              { "type": "userNotes", "attrs": { "userNotes": null, "id": null } },
+              { "type": "paragraph" }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "sermonLink": "sn-may10",
+  "serviceType": "Sunday Celebration",
+  "passage": "John 5:1-17",
+  "isDeleted": false,
+  "isPublished": false
+}

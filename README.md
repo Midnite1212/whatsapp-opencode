@@ -134,13 +134,15 @@ public URL:
    Gemma's is weak/inconsistent, so use a tool-capable coder (e.g. `qwen2.5-coder`)
    for those, or let them fall back to cloud.
 2. Start a tunnel to it; note the public URL.
-3. In `opencode.jsonc`, rename the `provider.local.models` key from `local-model` to
-   your served model name.
-4. Set Railway env vars:
+3. Set Railway env vars — **the only required one is `LOCAL_LLM_URL`**:
    - `LOCAL_LLM_URL` = `https://<tunnel-host>/v1`  (must end in `/v1`)
-   - `LOCAL_LLM_MODEL` = general/chat/parsing model (matches a key in step 3)
-   - `LOCAL_LLM_MODEL_STRUCTURAL` = coding/tools model (defaults to `LOCAL_LLM_MODEL`)
+   - That's it for the default: `LOCAL_LLM_MODEL` defaults to `auto`, so the bot
+     **discovers whatever model your server is serving** (via `GET /v1/models`) and
+     uses it — no need to name anything. The reply tag shows which model answered.
    - `LOCAL_LLM_API_KEY` = anything (most local servers ignore it)
+   - *(Optional, per-task routing)* set `LOCAL_LLM_MODEL` (general) and
+     `LOCAL_LLM_MODEL_STRUCTURAL` (coding/tools) to specific served model ids, and add
+     matching keys under `provider.local.models` in `opencode.jsonc`.
 5. Deploy. When your machine + tunnel are up, messages use the local models (general
    vs coding routed automatically); when they're down, the bot silently falls back to
    OpenRouter.

@@ -9,17 +9,21 @@
     // Self-hosted LLM (OpenAI-compatible: Ollama .../v1, LM Studio .../v1,
     // KoboldCpp .../v1). baseURL comes from LOCAL_LLM_URL (must be a PUBLIC tunnel
     // url, not localhost, since the bot runs on Railway).
-    // For MULTIPLE local models, use ONE endpoint that serves many (Ollama) and list
-    // each model key here, then point LOCAL_LLM_MODEL (general) and
-    // LOCAL_LLM_MODEL_STRUCTURAL (coding/tools) at the matching keys.
-    // Rename these keys to your EXACT Ollama model names (run `ollama list`),
-    // e.g. "gemma3:27b" (general) and "qwen2.5-coder:32b" (coding/tools).
+    // BY DEFAULT (LOCAL_LLM_MODEL=auto) the bot discovers whatever model your server
+    // is serving and sends that exact id — you don't need to touch the keys below.
+    // The `-m local/<id>` flag carries the real model id regardless of this list.
+    // ONLY edit this if you want per-task routing: list your model keys (e.g.
+    // "gemma3:27b", "qwen2.5-coder:32b") and set LOCAL_LLM_MODEL (general) +
+    // LOCAL_LLM_MODEL_STRUCTURAL (coding/tools) to match.
     "local": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Local LLM",
       "options": {
         "baseURL": "{env:LOCAL_LLM_URL}",
-        "apiKey": "{env:LOCAL_LLM_API_KEY}"
+        "apiKey": "{env:LOCAL_LLM_API_KEY}",
+        // ngrok free tier serves an HTML warning page without this header, which
+        // would break OpenCode's JSON calls. Harmless on Cloudflare/other tunnels.
+        "headers": { "ngrok-skip-browser-warning": "true" }
       },
       "models": {
         "local-model": {},

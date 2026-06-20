@@ -10,6 +10,7 @@ Secrets come from environment variables:
     MONGO_URL, OPENROUTER_API_KEY
 """
 
+import json
 import os
 import re
 import subprocess
@@ -83,15 +84,18 @@ CRM_AGENT_KEYWORDS = ("crm", "sync", "api", "post")
 # LOCAL_LLM_MODEL must match the model key declared under provider "local" in
 # opencode.jsonc.
 LOCAL_LLM_URL = os.environ.get("LOCAL_LLM_URL")              # e.g. https://abc.trycloudflare.com/v1
-# Two local models, routed by task (same split as the OpenRouter models). Use one
-# endpoint that serves multiple models (Ollama) and name them here. They must match
-# model keys under provider "local" in opencode.jsonc.
-LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "local-model")            # general / chat / parsing
-LOCAL_LLM_MODEL_STRUCTURAL = os.environ.get("LOCAL_LLM_MODEL_STRUCTURAL", LOCAL_LLM_MODEL)  # coding / tools
+# Model names. Default "auto" -> the bot discovers whatever model your local server
+# is serving (from GET /v1/models) and uses it, so you don't define anything: just
+# load a model and set LOCAL_LLM_URL. To route different tasks to different local
+# models instead, set these explicitly (must match keys served by your endpoint):
+#   LOCAL_LLM_MODEL            -> general / chat / parsing
+#   LOCAL_LLM_MODEL_STRUCTURAL -> coding / tools  (defaults to LOCAL_LLM_MODEL)
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "auto")
+LOCAL_LLM_MODEL_STRUCTURAL = os.environ.get("LOCAL_LLM_MODEL_STRUCTURAL", LOCAL_LLM_MODEL)
 LOCAL_LLM_API_KEY = os.environ.get("LOCAL_LLM_API_KEY", "local")  # most local servers ignore this
 LOCAL_LLM_HEALTH_TTL = int(os.environ.get("LOCAL_LLM_HEALTH_TTL", "30"))  # cache up/down (seconds)
 
-_local_health = {"checked_at": 0.0, "up": False}
+_local_health = {"checked_at": 0.0, "up": False, "model": None}
 
 # Append a small "— via local LLM / OpenRouter (cloud)" tag to each reply so you can
 # see which backend answered. Set SHOW_MODEL_SOURCE=false to hide it.
@@ -197,32 +201,53 @@ def local_llm_up() -> bool:
     if now - _local_health["checked_at"] < LOCAL_LLM_HEALTH_TTL:
         return _local_health["up"]
     up = False
+    model = None
     try:
         req = urllib.request.Request(
             LOCAL_LLM_URL.rstrip("/") + "/models",
-            headers={"Authorization": f"Bearer {LOCAL_LLM_API_KEY}"},
+            headers={
+                "Authorization": f"Bearer {LOCAL_LLM_API_KEY}",
+                # ngrok free tier injects an HTML interstitial without this header,
+                # which would break the JSON API. Harmless on other tunnels.
+                "ngrok-skip-browser-warning": "true",
+            },
         )
-        urllib.request.urlopen(req, timeout=4)
-        up = True
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            up = True
+            try:                          # discover the served model id for "auto"
+                data = json.loads(resp.read().decode("utf-8"))
+                served = data.get("data") or []
+                if served:
+                    model = served[0].get("id")
+            except Exception:
+                model = None
     except urllib.error.HTTPError:
         up = True       # server responded (just not 200) -> it's reachable
     except Exception:
         up = False      # connection refused / DNS / timeout -> down
-    _local_health.update(checked_at=now, up=up)
+    _local_health.update(checked_at=now, up=up, model=model)
     return up
 
 
 def opencode_model_for(structural: bool) -> str:
     """Full OpenCode model string for this task tier. Prefer the local LLM when
-    reachable (per-tier local model), otherwise fall back to OpenRouter (per-tier slug)."""
+    reachable (per-tier local model, or auto-discovered), else fall back to OpenRouter."""
     if local_llm_up():
-        return f"local/{LOCAL_LLM_MODEL_STRUCTURAL if structural else LOCAL_LLM_MODEL}"
+        name = LOCAL_LLM_MODEL_STRUCTURAL if structural else LOCAL_LLM_MODEL
+        if name in (None, "", "auto"):
+            # Use whatever the local server is serving; "local-model" is a last resort
+            # if discovery failed (server up but /models gave nothing usable).
+            name = _local_health.get("model") or "local-model"
+        return f"local/{name}"
     return f"openrouter/{MODEL_STRUCTURAL if structural else MODEL_GENERAL}"
 
 
 def model_source_label() -> str:
     """Human-readable backend in use right now (uses the cached health check)."""
-    return "local LLM" if local_llm_up() else "OpenRouter (cloud)"
+    if local_llm_up():
+        served = _local_health.get("model")
+        return f"local LLM ({served})" if served else "local LLM"
+    return "OpenRouter (cloud)"
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ MEMORY/
 /workspace/downloads/
 .opencode/*
 !.opencode/agent/
+!.opencode/skills/
 !.opencode/command/
 
 # Python

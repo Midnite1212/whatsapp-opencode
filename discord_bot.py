@@ -68,7 +68,10 @@ async def on_message(message: discord.Message):
     async with message.channel.typing():
         try:
             # core.handle_message is blocking -> run off the event loop.
-            reply = await asyncio.to_thread(core.handle_message, user_key, text)
+            # Pass the Discord display name so the model can attribute work (e.g. PRs).
+            reply = await asyncio.to_thread(
+                core.handle_message, user_key, text, message.author.display_name
+            )
         except asyncio.TimeoutError:
             reply = "⏳ That took too long and timed out. Try a smaller request."
         except Exception as exc:  # noqa: BLE001 - report any failure to the user

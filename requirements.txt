@@ -6,3 +6,4 @@ uvicorn[standard]==0.34.0  # ASGI server (used in the Dockerfile CMD)
 pywa==2.8.0             # Official-style WhatsApp Cloud API wrapper
 pymongo[srv]==4.10.1    # MongoDB driver (+srv pulls in dnspython for Atlas URIs)
 discord.py==2.4.0       # Discord bot adapter (group @mentions + DMs)
+pyjwt[crypto]==2.10.1   # sign JWTs to mint GitHub App installation tokens

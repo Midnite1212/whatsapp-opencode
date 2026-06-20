@@ -33,3 +33,6 @@ Because this is a Railway PoC with no real CRM credentials:
 - Never invent success — if something fails, say so plainly.
 - Never echo secrets, tokens, or environment variable values.
 - For code changes, make the smallest correct edit; the human reviews later.
+- **Attribution:** the chat requester is given in the message context as
+  `[Requester: <name>]`. Whenever you open a GitHub pull request, include a line
+  `Requested by: <name>` in the PR description so each PR traces back to who asked.

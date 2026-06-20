@@ -69,6 +69,78 @@ and handed to OpenCode.
   *tool-capable* model (`qwen/qwen3-coder:free`); only plain chat uses `openrouter/free`.
   If you enable `USE_ORCHESTRATOR` on free, pin its model to a tool-capable one too.
 
+## Integrations: GitHub PRs & Org API
+
+### GitHub (bot identity → PRs)
+The bot opens PRs as whatever `GITHUB_TOKEN` belongs to, and supports **two auth modes**.
+
+**PoC (current): fine-grained PAT.** Generate a fine-grained PAT with **Contents: R/W**
++ **Pull requests: R/W** and set `GITHUB_TOKEN`. For the PoC you can use **your own
+account** (PRs show as you) — fastest, no new accounts. Per-user attribution is
+preserved in the PR body: every PR the bot opens ends with **`Requested by: <chat
+user>`** (the Discord display name / WhatsApp profile name of whoever asked), injected
+from the message context per `AGENTS.md`.
+
+**Production: dedicated identity — DECISION FOR LAUNCH (open).** Pick one:
+- a dedicated **machine user** + its own fine-grained PAT (separate identity, simple), or
+- your **own GitHub App** (`[bot]` identity, higher rate limits, no extra seat). The bot
+  already mints installation tokens automatically — set `GITHUB_APP_ID`,
+  `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` (App ID + Installation ID from
+  the App settings; PEM from "Generate a private key"; Railway-mangled newlines may be
+  given as literal `\n`) and leave `GITHUB_TOKEN` unset.
+- Note: a **third-party** installed app (the existing `opencode-agent`) can't be used —
+  you don't have its private key. It must be your own App.
+
+Either mode is **API-only** via the GitHub MCP: `create_branch` → `push_files` →
+`create_pull_request`, no repo clone.
+
+Tradeoff: the MCP adds many tools to every request, which can strain a local model's
+tool loop. If reliability drops, scope GitHub tools to a dedicated agent rather than
+globally.
+
+### Org API (authenticated POST/GET via a machine-user account)
+Handled by the **`org-api` agent** (`.opencode/agent/org-api.md`), auto-routed on
+keywords like *sync / post / submit / upload / crm / api*. The org has no app-client
+infrastructure, so the bot authenticates as a **dedicated machine-user account**
+(least-privilege, MFA-exempt). It reads secrets only from env, logs in, then calls the
+endpoints. Set on Railway:
+- `ORG_API_BASE_URL` — base URL of the org API
+- `ORG_LOGIN_URL` — the login endpoint, i.e. `<base>/api/auth/login`
+- `ORG_USERNAME` — the machine-user **email** (sent as the `emailAddress` field)
+- `ORG_PASSWORD` — its password
+
+Flow (verified against the org's Sails backend):
+`POST /api/auth/login` with `{ emailAddress, password }` → the **response body is the
+raw JWT string** (not `{token: …}`) → send it on every call as the header
+**`Authorisation: Bearer <jwt>`**. ⚠️ Note the **British spelling `Authorisation`**
+(with an "s") and the literal `Bearer` scheme — the server rejects the standard
+`Authorization` (with a "z") with a 401. The payload comes from the document-processing
+step (doc → sermon-notes JSON). (`crm-sync-mock.md` remains for offline mock testing.)
+
+Security note: a machine user with a password is a bigger blast radius than scoped
+client credentials — keep it least-privilege, MFA-exempt (so login isn't blocked),
+and rotate the password. Revisit for production.
+
+### Skills (the way to add capabilities)
+Capabilities are added as **skills**, not agents. A skill is a folder with a `SKILL.md`:
+```
+.opencode/skills/<name>/SKILL.md
+```
+Skills are **global** and use **progressive disclosure** — the model only sees each
+skill's name + description (cheap) and loads the full body **on demand** when relevant.
+That keeps per-request context lean (important for the local model) and makes skills
+reusable across agents. They're registered via `skills.paths` in `opencode.jsonc`
+(absolute path, since the bot's cwd isn't reliably `/workspace`).
+
+Prefer a **skill** for a new *procedure* (e.g. "convert sermon notes", "fetch a member
+record"); reserve an **agent** for a distinct *tool/permission/model profile*.
+
+First skill: **`sermon-notes-parser`** — converts a sermon-prep doc (`.docx`) → the org's
+sermon-notes JSON (tiptap `originalContent` + metadata). The full mapping lives in its
+`SKILL.md`, with a worked example in `reference.json`. Runs via the bash-capable
+**`sermon-notes`** agent (it unzips the `.docx` to read which runs are highlighted).
+End-to-end target: receive notes → `sermon-notes-parser` (convert) → `org-api` (submit).
+
 ## Future Improvements
 
 ### Conversation memory (the ladder)
@@ -235,3 +307,65 @@ Implementation:
 Set `USE_ORCHESTRATOR=true` to route every message through the `orchestrator` agent,
 which delegates to `xml-parser` / `crm-sync-mock` subagents (each can use its own model).
 More model calls; only worth it on paid.
+
+## Production Hardening (when this stops being a PoC)
+
+Everything below is fine for the PoC but should be revisited before real/wider use.
+Consolidated from the whole build.
+
+### Hosting & infrastructure
+- **Local LLM via home PC + ngrok is PoC-only.** It relies on your machine being on and
+  an obscurity-only tunnel. For production, host the model on a real GPU server (the
+  planned DigitalOcean box) or use a paid API — and put it behind stable, authenticated
+  ingress (Cloudflare Tunnel + Access, or same-network hosting), not a throwaway tunnel.
+- **Stay single-worker / single-replica** as built — Discord allows one gateway
+  connection per token and LM Studio serves one slot. To scale you need Discord
+  sharding, a **job queue**, and `opencode serve` + worker processes; naively running
+  multiple replicas will break the Discord connection and the single tunnel.
+- **OpenCode cold-boots per message.** Optimize latency with `opencode serve` +
+  `opencode run --attach` instead of spawning a fresh process each time.
+
+### Security
+- **`--dangerously-skip-permissions` auto-approves ALL tool actions** (including `bash`
+  and `edit`). The bot can run arbitrary shell in its container. Acceptable for a trusted
+  PoC; before wider exposure, scope permissions per agent and sandbox/limit the shell.
+- **Lock down the local-LLM endpoint** — never leave an open LLM on a public URL. Use a
+  bearer-checking proxy (Caddy) or Cloudflare Access.
+- **Abuse & input controls** — per-user rate limits, input validation, and cost caps
+  (token budgets). Today any allow-listed user can trigger arbitrary agentic work.
+- **MongoDB (if re-enabled):** replace the `0.0.0.0/0` access list with restricted
+  access (static egress IP / VPC peering) once you have a stable egress IP.
+
+### Identity & secrets
+- **WhatsApp:** move from the **test number + 24h token + allow-list** to a real phone
+  number, **Meta Business verification**, and a permanent **System User token**.
+- **GitHub identity — OPEN DECISION for launch.** PoC uses a **personal-account PAT**
+  (fine short-term, but PRs come from a human and it's not a real bot identity). Before
+  launch, choose:
+  - a dedicated **machine user** + fine-grained PAT (separate identity, minimal setup), or
+  - your **own GitHub App** (`[bot]` identity, higher rate limits, no extra seat) — the
+    token-minting code already supports it (`GITHUB_APP_*`).
+  (The existing third-party `opencode-agent` app can't be used — no access to its key.)
+  Either way, per-user attribution stays in the PR body (`Requested by: <chat user>`).
+- **Secret hygiene:** rotate `GITHUB_TOKEN`/`OPENROUTER_API_KEY`/`ORG_CLIENT_SECRET`,
+  apply least-privilege scopes, and consider a secrets manager over raw env vars.
+
+### Reliability
+- **Add retries/backoff** for model and org-API rate limits instead of surfacing the
+  raw error to the user.
+- **Observability:** structured logging, monitoring, and alerting (right now failures
+  only show up in Railway logs / the chat reply).
+
+### Models, memory & tools
+- **Move off free OpenRouter** (rate-limited, models churn) to paid models or a properly
+  hosted local model — see the *Going Paid* playbook above.
+- **Add conversation memory** if needed (tier #2 sessions / #3 distilled) — see
+  *Future Improvements*.
+- **Scope MCP tools per agent.** Enabling big MCP toolsets (e.g. GitHub) globally adds
+  many tools to every request, which strains weaker/local models' tool loops. Restrict
+  GitHub tools to a dedicated PR agent rather than enabling them for all messages.
+
+### Data handling
+- **Uploaded documents** land in `/workspace/downloads` — add cleanup, size limits, and
+  scanning before processing untrusted files.
+- **org-api:** minimize OAuth scopes and rotate the client secret.

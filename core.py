@@ -73,7 +73,9 @@ MODEL_STRUCTURAL = os.environ.get("MODEL_STRUCTURAL", "openrouter/free")
 
 STRUCTURAL_KEYWORDS = ("xml", "json", "crm", "api", "parse", "document")
 XML_AGENT_KEYWORDS = ("xml", "parse")
-CRM_AGENT_KEYWORDS = ("crm", "sync", "api", "post")
+# Real authenticated org-API calls (OAuth client-credentials) -> org-api agent.
+# (crm-sync-mock.md is kept for offline mock testing; invoke it explicitly if needed.)
+ORG_API_KEYWORDS = ("crm", "sync", "api", "post", "submit", "upload", "send to")
 
 # --- Local LLM (self-hosted on your own PC) ---------------------------------
 # When LOCAL_LLM_URL is set AND reachable, use your local model for everything;
@@ -100,6 +102,16 @@ _local_health = {"checked_at": 0.0, "up": False, "model": None}
 # Append a small "— via local LLM / OpenRouter (cloud)" tag to each reply so you can
 # see which backend answered. Set SHOW_MODEL_SOURCE=false to hide it.
 SHOW_MODEL_SOURCE = os.environ.get("SHOW_MODEL_SOURCE", "true").lower() == "true"
+
+# --- GitHub App (bot identity for PRs) ----------------------------------------
+# A GitHub App has no static token. We mint a short-lived installation token
+# (JWT -> exchange) and inject it as GITHUB_TOKEN for the GitHub MCP, cached ~50 min.
+# Set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY (the PEM).
+# (Prefer a plain PAT instead? Just set GITHUB_TOKEN directly and leave these unset.)
+GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID")
+GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+_gh_token = {"token": None, "expires_at": 0.0}
 
 # ---------------------------------------------------------------------------
 # Database — only connected when history is enabled; otherwise the bot is fully
@@ -137,8 +149,8 @@ def route_agent_automatically(user_prompt: str) -> str | None:
     lowered = user_prompt.lower()
     if any(keyword in lowered for keyword in XML_AGENT_KEYWORDS):
         return "xml-parser"
-    if any(keyword in lowered for keyword in CRM_AGENT_KEYWORDS):
-        return "crm-sync-mock"
+    if any(keyword in lowered for keyword in ORG_API_KEYWORDS):
+        return "org-api"
     return None
 
 
@@ -255,6 +267,41 @@ def opencode_model_for(structural: bool) -> str:
     return f"openrouter/{MODEL_STRUCTURAL if structural else MODEL_GENERAL}"
 
 
+def github_installation_token() -> str | None:
+    """Mint (and cache ~50 min) a GitHub App installation token for the GitHub MCP.
+
+    Returns None if the App isn't fully configured or minting fails — in which case
+    the bot still works for everything except GitHub. Never logs the key or token.
+    """
+    if not (GITHUB_APP_ID and GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY):
+        return None
+    now = time.time()
+    if _gh_token["token"] and now < _gh_token["expires_at"]:
+        return _gh_token["token"]
+    try:
+        import jwt  # PyJWT; lazy import so the module loads even without it installed
+        key = GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n")  # tolerate escaped newlines
+        assertion = jwt.encode(
+            {"iat": int(now) - 60, "exp": int(now) + 540, "iss": GITHUB_APP_ID},
+            key, algorithm="RS256",
+        )
+        req = urllib.request.Request(
+            f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {assertion}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "whatsapp-opencode-bot",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        _gh_token.update(token=data["token"], expires_at=now + 3000)  # ~50 min cache
+        return _gh_token["token"]
+    except Exception:
+        return None
+
+
 def model_source_label() -> str:
     """Human-readable backend in use right now (uses the cached health check)."""
     if local_llm_up():
@@ -298,6 +345,11 @@ def run_opencode(
         "OPENCODE_CONFIG_DIR": os.path.join(WORKSPACE_DIR, ".opencode"),
         "OPENCODE_CONFIG": os.path.join(WORKSPACE_DIR, "opencode.jsonc"),
     }
+    # GitHub App: inject a fresh installation token as GITHUB_TOKEN for the MCP.
+    # (No-op if you use a plain PAT — that GITHUB_TOKEN is already in os.environ.)
+    gh = github_installation_token()
+    if gh:
+        child_env["GITHUB_TOKEN"] = gh
 
     # Pin the model via -m so OpenCode can't wander onto a default; --agent
     # (optional) only layers behaviour/tools on top.
@@ -420,8 +472,8 @@ def help_text() -> str:
     return "\n".join(parts)
 
 
-def handle_message(user_key: str, text: str, file_path: str | None = None,
-                   default_agent: str | None = None) -> str:
+def handle_message(user_key: str, text: str, requester: str | None = None,
+                   file_path: str | None = None, default_agent: str | None = None) -> str:
     """Full turn: load history -> dispatch to OpenCode -> persist -> return reply.
 
     This is BLOCKING (subprocess + pymongo). Async callers (Discord) must run it
@@ -433,7 +485,9 @@ def handle_message(user_key: str, text: str, file_path: str | None = None,
         return help_text()
 
     history = load_history(user_key)
-    full_prompt = f"{history}\nUser: {text}".strip()
+    # Carry the chat requester so the model can attribute work (e.g. stamp PRs).
+    context = f"[Requester: {requester}]\n" if requester else ""
+    full_prompt = f"{context}{history}\nUser: {text}".strip()
     reply = dispatch(full_prompt, routing_text=text, file_path=file_path,
                      default_agent=default_agent)
     append_history(user_key, text, reply)  # store the clean reply, without the tag

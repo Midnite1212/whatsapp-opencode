@@ -69,7 +69,8 @@ def handle_text(_: WhatsApp, msg: types.Message) -> None:
     """Inbound WhatsApp text -> shared brain -> reply."""
     try:
         msg.mark_as_read()
-        reply = core.handle_message(f"whatsapp:{msg.from_user.wa_id}", msg.text)
+        requester = msg.from_user.name or msg.from_user.wa_id  # WhatsApp profile name
+        reply = core.handle_message(f"whatsapp:{msg.from_user.wa_id}", msg.text, requester)
         msg.reply(reply[:_WHATSAPP_LIMIT])
     except subprocess.TimeoutExpired:
         msg.reply("⏳ That took too long and timed out. Try a smaller request.")
@@ -87,9 +88,11 @@ def handle_document(_: WhatsApp, msg: types.Message) -> None:
         msg.document.download(path=local_path)
 
         caption = msg.caption or "Process this document."
+        requester = msg.from_user.name or msg.from_user.wa_id
         reply = core.handle_message(
             f"whatsapp:{msg.from_user.wa_id}",
             caption,
+            requester=requester,
             file_path=local_path,
             default_agent="xml-parser",  # documents default to XML parsing
         )

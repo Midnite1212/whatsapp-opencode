@@ -1,5 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  // Explicit absolute skills path: OPENCODE_CONFIG_DIR covers agents/commands/plugins
+  // but NOT skills, and the bot's cwd isn't reliably /workspace — so point here directly.
+  "skills": {
+    "paths": ["/workspace/.opencode/skills"]
+  },
+  // Load AGENTS.md by absolute path so it applies regardless of cwd (carries the
+  // attribution rule + skill guidance).
+  "instructions": ["/workspace/AGENTS.md"],
   "provider": {
     "openrouter": {
       "options": {
@@ -45,7 +53,7 @@
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer {env:GITHUB_TOKEN}" },
-      "enabled": false
+      "enabled": true
     }
     // TODO: Flip once in the paid stream — semantic code nav/edit via LSP → more accurate tweaks.
     // Local MCP: needs `uv`/`uvx` added to the Dockerfile first (not installed yet).

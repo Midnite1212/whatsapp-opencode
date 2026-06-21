@@ -84,6 +84,14 @@ ORG_API_KEYWORDS = ("crm", "sync", "api", "post", "submit", "upload", "send to")
 # Where a converted sermon-notes JSON is POSTed (relative to ORG_API_BASE_URL).
 ORG_SERMON_CREATE_PATH = os.environ.get("ORG_SERMON_CREATE_PATH", "/api/sermon-notes-parent/create")
 
+# GitHub PR/issue work uses the global GitHub MCP (no specialist agent). These keywords
+# (a) mark the message structural so it gets the TOOL-CAPABLE model the MCP needs, and
+# (b) keep it OFF the org-api agent — e.g. "submit a pull request" contains org-api's
+# "submit", so GitHub is matched FIRST in routing. Conventions (org, default repo) live in
+# AGENTS.md; the github-pr / github-issues / github-fix-issue skills hold the procedures.
+GITHUB_KEYWORDS = ("github", "pull request", "raise a pr", "open a pr", "create a pr",
+                   "merge request", "issue")
+
 # --- Local LLM (self-hosted on your own PC) ---------------------------------
 # When LOCAL_LLM_URL is set AND reachable, use your local model for everything;
 # otherwise fall back to OpenRouter automatically. Because the bot runs on Railway
@@ -139,7 +147,7 @@ if HISTORY_ENABLED:
 def _is_structural(text: str) -> bool:
     """Does the message imply structural/coding/tool work (vs general chat)?"""
     lowered = text.lower()
-    return any(keyword in lowered for keyword in STRUCTURAL_KEYWORDS)
+    return any(keyword in lowered for keyword in STRUCTURAL_KEYWORDS + GITHUB_KEYWORDS)
 
 
 def route_model_automatically(user_prompt: str) -> str:
@@ -154,6 +162,10 @@ def route_agent_automatically(user_prompt: str) -> str | None:
     markdown — so model selection for specialised work lives in one place.
     """
     lowered = user_prompt.lower()
+    # GitHub work has no specialist agent — it uses the global GitHub MCP on the general
+    # path. Match it FIRST so org-api keywords (e.g. "submit") don't hijack a PR request.
+    if any(keyword in lowered for keyword in GITHUB_KEYWORDS):
+        return None
     if any(keyword in lowered for keyword in SERMON_KEYWORDS):
         return "sermon-notes"
     if any(keyword in lowered for keyword in XML_AGENT_KEYWORDS):

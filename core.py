@@ -224,8 +224,9 @@ def _local_base_url() -> str:
 
 def local_llm_up() -> bool:
     """Is the self-hosted LLM reachable? Cached for LOCAL_LLM_HEALTH_TTL seconds so
-    we don't ping it on every message. Any HTTP response (even 401/404) counts as
-    'reachable'; only connection errors/timeouts count as down."""
+    we don't ping it on every message. Only a 2xx on /v1/models counts as UP — any HTTP
+    error (incl. an offline ngrok tunnel's 502/404) or connection error means DOWN, so
+    the bot falls back to OpenRouter."""
     if not LOCAL_LLM_URL:
         return False
     now = time.time()
@@ -256,7 +257,7 @@ def local_llm_up() -> bool:
             except Exception:
                 model = None
     except urllib.error.HTTPError:
-        up = True       # server responded (just not 200) -> it's reachable
+        up = False      # e.g. offline ngrok tunnel returns 502/404 -> DOWN -> fall back
     except Exception:
         up = False      # connection refused / DNS / timeout -> down
     _local_health.update(checked_at=now, up=up, model=model)

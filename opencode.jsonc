@@ -37,7 +37,7 @@
         // limit.output caps the reserved response size (OpenCode otherwise asks for
         // ~32k, which overflows small windows). limit.context must be <= the context
         // you load the model with in LM Studio. Raise both if your VRAM allows.
-        "qwen/qwen3.6-27b": { "limit": { "context": 24576, "output": 4096 } }
+        "qwen/qwen3.6-27b": { "limit": { "context": 16384, "output": 4096 } }
       }
     }
   },

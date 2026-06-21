@@ -35,9 +35,14 @@
       },
       "models": {
         // limit.output caps the reserved response size (OpenCode otherwise asks for
-        // ~32k, which overflows small windows). limit.context must be <= the context
-        // you load the model with in LM Studio. Raise both if your VRAM allows.
-        "qwen/qwen3.6-27b": { "limit": { "context": 16384, "output": 4096 } }
+        // ~32k, which overflows small windows). limit.context MUST be <= the context you
+        // actually LOAD the model with in LM Studio — changing it here alone does nothing.
+        // 16384 is too small for agentic tool-use: OpenCode's system prompt + built-in
+        // tools + even a scoped GitHub MCP is ~18.8k tokens before any work, so it
+        // overflowed (n_keep > n_ctx). 32k clears that with room for the tool loop.
+        // VRAM: a 27B at Q4 + 32k KV is ~20-22GB — usually fits 24GB; higher quants spill,
+        // in which case drop to 24576 or use a smaller coder model (e.g. qwen2.5-coder-14B).
+        "qwen/qwen3.6-27b": { "limit": { "context": 32768, "output": 4096 } }
       }
     }
   },
@@ -56,7 +61,14 @@
       // local model, bloats context / hangs at init if its token is missing.
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
-      "headers": { "Authorization": "Bearer {env:GITHUB_TOKEN}" },
+      "headers": {
+        "Authorization": "Bearer {env:GITHUB_TOKEN}",
+        // Scope to ONLY the toolsets our skills use. The full Copilot MCP exposes dozens of
+        // tools (actions, code/secret scanning, dependabot, notifications, gists, …) whose
+        // schemas flooded the local model's window (n_keep 20559 > n_ctx 16384). repos
+        // (read files + create_branch + push_files), pull_requests (open PR), issues.
+        "X-MCP-Toolsets": "repos,issues,pull_requests"
+      },
       "enabled": false
     }
     // TODO: Flip once in the paid stream — semantic code nav/edit via LSP → more accurate tweaks.

@@ -413,6 +413,81 @@ def _extract_json_object(text: str) -> str | None:
     return blob
 
 
+def _docx_to_outline(path: str) -> str | None:
+    """Extract a COMPACT outline from a .docx for the model, instead of letting the agent
+    read the raw `word/document.xml`. That XML is ~90% OOXML boilerplate and runs 15-19k
+    tokens for a real sermon — on a small-context local model it overflows the window and
+    truncation drops the user turn (LM Studio then errors "No user query found in
+    messages"). The outline keeps only what conversion needs: one line per paragraph,
+    tagged by kind, with `<hl>…</hl>` for yellow highlight and `*…*` for bold.
+
+    Returns None if `path` isn't a readable .docx (caller falls back to reading the file).
+    """
+    import zipfile
+    import xml.etree.ElementTree as ET
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+    def _val(elem):
+        return elem.get(W + "val") if elem is not None else None
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+        body = ET.fromstring(doc_xml).find(f"{W}body")
+    except (zipfile.BadZipFile, KeyError, OSError, ET.ParseError):
+        return None
+    if body is None:
+        return None
+
+    lines = []
+    for para in body.findall(f"{W}p"):
+        ppr = para.find(f"{W}pPr")
+        style = depth = None
+        if ppr is not None:
+            style = _val(ppr.find(f"{W}pStyle"))
+            numpr = ppr.find(f"{W}numPr")
+            if numpr is not None:
+                ilvl = _val(numpr.find(f"{W}ilvl"))
+                depth = int(ilvl) if (ilvl or "").isdigit() else 0
+            olvl = _val(ppr.find(f"{W}outlineLvl"))
+            if olvl is not None:
+                style = f"outline{olvl}"
+
+        parts, max_sz = [], 0
+        for run in para.findall(f"{W}r"):
+            rpr = run.find(f"{W}rPr")
+            hl = bold = False
+            if rpr is not None:
+                hi = rpr.find(f"{W}highlight")
+                hl = hi is not None and _val(hi) == "yellow"
+                bold = rpr.find(f"{W}b") is not None
+                sz = _val(rpr.find(f"{W}sz"))
+                if (sz or "").isdigit():
+                    max_sz = max(max_sz, int(sz))
+            text = "".join(t.text or "" for t in run.findall(f"{W}t"))
+            if not text:
+                continue
+            if bold:
+                text = f"*{text}*"
+            if hl:
+                text = f"<hl>{text}</hl>"
+            parts.append(text)
+
+        line = "".join(parts).strip()
+        if not line:
+            continue
+        if style and ("Heading" in style or "Title" in style or style.startswith("outline")):
+            tag = f"H[{style}]"
+        elif max_sz >= 24:
+            tag = f"H[sz{max_sz}]"
+        elif depth is not None:
+            tag = f"LI{depth}"
+        else:
+            tag = "P"
+        lines.append(f"{tag}: {line}")
+    return "\n".join(lines) or None
+
+
 def run_sermon_pipeline(full_prompt: str, model: str, file_path: str | None = None) -> str:
     """Chain two agents: sermon-notes converts the doc -> sermon JSON, then org-api
     authenticates and POSTs it to the org's create endpoint.
@@ -421,8 +496,20 @@ def run_sermon_pipeline(full_prompt: str, model: str, file_path: str | None = No
     back through a free model's prompt would risk truncation/mangling. org-api just curls
     the file verbatim.
     """
-    # 1) Convert the document to sermon-notes JSON.
-    raw = run_opencode(full_prompt, model=model, agent="sermon-notes", file_path=file_path)
+    # 1) Convert the document to sermon-notes JSON. For a .docx we feed a COMPACT outline
+    #    inline (the model never reads the bloated raw XML); otherwise pass the file through.
+    outline = _docx_to_outline(file_path) if file_path else None
+    if outline:
+        convert_prompt = (
+            f"{full_prompt}\n\n"
+            "The sermon document was extracted to this compact outline — one line per "
+            "paragraph: `H[…]` heading, `LI<n>` list item at depth n, `P` paragraph; "
+            "`<hl>…</hl>` = yellow highlight, `*…*` = bold. Convert it to the sermon-notes "
+            f"JSON per the sermon-notes-parser skill.\n\n{outline}"
+        )
+        raw = run_opencode(convert_prompt, model=model, agent="sermon-notes")
+    else:
+        raw = run_opencode(full_prompt, model=model, agent="sermon-notes", file_path=file_path)
     blob = _extract_json_object(raw)
     if not blob:
         # No valid JSON to submit — surface the conversion output so the failure is visible.

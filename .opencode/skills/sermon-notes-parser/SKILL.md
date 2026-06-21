@@ -35,14 +35,19 @@ submits the result.
 
 The source is the full leader prep doc; only a lean subset goes to congregants.
 
-To read highlight + structure reliably, parse the **.docx** (a zip of XML), not the
-plain-text export (which discards formatting). A run is highlighted when its `w:rPr`
-contains `<w:highlight w:val="yellow"/>`. Capture each run's text, highlight, bold/italic,
-heading level, and list nesting before converting:
+**You normally receive a pre-extracted compact outline** (the harness pulls it from the
+`.docx` so you never read the bloated raw XML). Format — one line per paragraph:
 
-```bash
-mkdir -p _x && cd _x && unzip -o "$DOC.docx" >/dev/null   # then parse word/document.xml
-```
+- `H[…]:` a heading. `H[sz28]` = the big thesis line → tiptap level 1; `H[sz24]` = a main
+  point → level 2. Highlighted short `LI<n>` labels under a main point are its
+  **sub-headings** → level 3 (see renumbering below).
+- `LI<n>:` a list item at nesting depth `n` (0 = top). `P:` a plain paragraph.
+- `<hl>…</hl>` = yellow highlight (the pastor's emphasis — where power words / emphasized
+  phrases live). `*…*` = bold.
+
+Convert that outline with the rules below. (If instead you're handed raw text or a file
+path — e.g. a non-`.docx` — convert that directly; a run is highlighted when its `w:rPr`
+has `<w:highlight w:val="yellow"/>`.)
 
 **KEEP:**
 - The `Read <passage>` line → the opening `bibleVerse`.

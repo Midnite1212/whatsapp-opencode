@@ -565,6 +565,39 @@ def _docx_to_outline(path: str) -> str | None:
     return "\n".join(lines) or None
 
 
+_GDOC_RE = re.compile(r"docs\.google\.com/document/d/([A-Za-z0-9_-]+)")
+
+
+def _fetch_gdoc_outline(text: str) -> str | None:
+    """If the message contains a Google Docs URL, download it as .docx and return the
+    compact outline — so a pasted link is handled server-side just like an uploaded file.
+    Without this the model fetches+parses the 76KB doc itself, which is slow and derails
+    small local models (they narrate a plan and stop instead of emitting JSON). Returns
+    None if there's no URL or the doc isn't publicly exportable (caller then falls back)."""
+    match = _GDOC_RE.search(text or "")
+    if not match:
+        return None
+    doc_id = match.group(1)
+    dest = os.path.join(DOWNLOADS_DIR, f"gdoc_{doc_id}.docx")
+    try:
+        req = urllib.request.Request(
+            f"https://docs.google.com/document/d/{doc_id}/export?format=docx",
+            headers={"User-Agent": "whatsapp-opencode-bot"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        return _docx_to_outline(dest)
+    except Exception:
+        return None
+    finally:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+
+
 def run_sermon_pipeline(full_prompt: str, model: str, file_path: str | None = None) -> str:
     """Chain two agents: sermon-notes converts the doc -> sermon JSON, then org-api
     authenticates and POSTs it to the org's create endpoint.
@@ -573,16 +606,21 @@ def run_sermon_pipeline(full_prompt: str, model: str, file_path: str | None = No
     back through a free model's prompt would risk truncation/mangling. org-api just curls
     the file verbatim.
     """
-    # 1) Convert the document to sermon-notes JSON. For a .docx we feed a COMPACT outline
-    #    inline (the model never reads the bloated raw XML); otherwise pass the file through.
-    outline = _docx_to_outline(file_path) if file_path else None
+    # 1) Convert the document to sermon-notes JSON. We feed a COMPACT outline inline so the
+    #    model never fetches/parses the raw doc itself: an UPLOADED .docx -> extract from the
+    #    file; a pasted Google Docs URL -> download + extract server-side. Either way the
+    #    model just does text->JSON (one shot), which small local models handle far better.
+    outline = _docx_to_outline(file_path) if file_path else _fetch_gdoc_outline(full_prompt)
     if outline:
         convert_prompt = (
-            f"{full_prompt}\n\n"
-            "The sermon document was extracted to this compact outline — one line per "
-            "paragraph: `H[…]` heading, `LI<n>` list item at depth n, `P` paragraph; "
-            "`<hl>…</hl>` = yellow highlight, `*…*` = bold. Convert it to the sermon-notes "
-            f"JSON per the sermon-notes-parser skill.\n\n{outline}"
+            "Convert the sermon document below into the sermon-notes JSON, following the "
+            "sermon-notes-parser skill. The document is ALREADY extracted into this compact "
+            "outline — one line per paragraph: `H[…]` heading, `LI<n>` list item at depth n, "
+            "`P` paragraph; `<hl>…</hl>` = yellow highlight, `*…*` = bold.\n"
+            "Do NOT download, fetch, unzip, or parse anything — just use the outline below. "
+            "Respond with ONLY the final JSON object: no plan, no progress notes, no "
+            "'continue', no commentary, no code fences.\n\n"
+            f"Request: {full_prompt}\n\nOUTLINE:\n{outline}"
         )
         raw = run_opencode(convert_prompt, model=model, agent="sermon-notes")
     else:

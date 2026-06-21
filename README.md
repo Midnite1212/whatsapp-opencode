@@ -92,11 +92,20 @@ from the message context per `AGENTS.md`.
   you don't have its private key. It must be your own App.
 
 Either mode is **API-only** via the GitHub MCP: `create_branch` → `push_files` →
-`create_pull_request`, no repo clone.
+`create_pull_request`, no repo clone. The PR/issue *procedures* live in the
+`github-pr` / `github-issues` / `github-fix-issue` skills; the org/default-repo
+convention is in `AGENTS.md`.
 
-Tradeoff: the MCP adds many tools to every request, which can strain a local model's
-tool loop. If reliability drops, scope GitHub tools to a dedicated agent rather than
-globally.
+**On/off via env — `GITHUB_MCP_ENABLED`.** The remote GitHub MCP must be reached on
+**every** run and dumps many tool schemas into the prompt — on a small local model that
+bloats context, and a missing/blocked `GITHUB_TOKEN` makes OpenCode **hang at MCP init
+before the model even starts**. So it's **off by default** and toggled by the
+`GITHUB_MCP_ENABLED` Railway variable (`true`/`false`). OpenCode's `{env:…}` only
+interpolates *string* values, not the boolean `enabled`, so `core.py` regenerates the
+effective config from `opencode.jsonc` with this flag applied (`_build_runtime_config`) —
+flip it in Railway, no image rebuild. Set `GITHUB_MCP_ENABLED=true` (with a valid
+`GITHUB_TOKEN`) only when you want PR/issue work; leave it off for the sermon/local-model
+flow.
 
 ### Org API (authenticated POST/GET via a machine-user account)
 Handled by the **`org-api` agent** (`.opencode/agent/org-api.md`), auto-routed on

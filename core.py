@@ -128,6 +128,71 @@ GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID")
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY")
 _gh_token = {"token": None, "expires_at": 0.0}
 
+# --- GitHub MCP on/off via env (Railway-flippable) ----------------------------
+# The remote GitHub MCP is heavy (many tool schemas) and must be reached on EVERY run —
+# on a small local model that bloats context, and a missing/blocked token makes OpenCode
+# hang at MCP init before the model even starts. OpenCode's `{env:...}` only interpolates
+# STRING values, so a boolean like `enabled` can't be driven from env directly. Instead we
+# generate the effective config from the baked opencode.jsonc with this flag applied
+# (see _build_runtime_config). OFF by default; set GITHUB_MCP_ENABLED=true for PR/issue work.
+GITHUB_MCP_ENABLED = os.environ.get("GITHUB_MCP_ENABLED", "false").lower() == "true"
+
+
+def _strip_jsonc(text: str) -> str:
+    """Strip // and /* */ comments (respecting string literals so `https://` survives) and
+    trailing commas, so json.loads can parse our commented opencode.jsonc."""
+    out, i, n = [], 0, len(text)
+    in_str = esc = False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            i += 1
+        elif c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+        elif c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+        elif c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+        else:
+            out.append(c)
+            i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def _build_runtime_config() -> str:
+    """Generate the effective OpenCode config from the baked opencode.jsonc with
+    `mcp.github.enabled` set from GITHUB_MCP_ENABLED, and return its path. Other `{env:...}`
+    placeholders are left intact for OpenCode to interpolate at load. Falls back to the
+    baked file on any parse error (so a sanitizer bug never bricks the bot)."""
+    baked = os.path.join(WORKSPACE_DIR, "opencode.jsonc")
+    try:
+        cfg = json.loads(_strip_jsonc(open(baked, encoding="utf-8").read()))
+        gh = cfg.get("mcp", {}).get("github")
+        if isinstance(gh, dict):
+            gh["enabled"] = GITHUB_MCP_ENABLED
+        runtime = os.path.join(DOWNLOADS_DIR, "opencode.runtime.json")
+        with open(runtime, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+        return runtime
+    except Exception:
+        return baked
+
+
+OPENCODE_CONFIG_PATH = _build_runtime_config()
+
 # ---------------------------------------------------------------------------
 # Database — only connected when history is enabled; otherwise the bot is fully
 # stateless and has NO MongoDB dependency (nothing to fail on Railway).
@@ -365,7 +430,7 @@ def run_opencode(
         "LOCAL_LLM_API_KEY": LOCAL_LLM_API_KEY,  # consumed by opencode.jsonc {env:...}
         "NO_COLOR": "1",
         "OPENCODE_CONFIG_DIR": os.path.join(WORKSPACE_DIR, ".opencode"),
-        "OPENCODE_CONFIG": os.path.join(WORKSPACE_DIR, "opencode.jsonc"),
+        "OPENCODE_CONFIG": OPENCODE_CONFIG_PATH,
     }
     # GitHub App: inject a fresh installation token as GITHUB_TOKEN for the MCP.
     # (No-op if you use a plain PAT — that GITHUB_TOKEN is already in os.environ.)
@@ -557,6 +622,13 @@ def dispatch(full_prompt: str, routing_text: str, file_path: str | None = None,
              default_agent: str | None = None) -> str:
     """Decide how a message is run and run it. Picks local-LLM-or-OpenRouter for the
     model, and an optional specialist agent on top."""
+    # Fail fast on GitHub work when its MCP is off: the repo isn't checked out locally, so
+    # with no GitHub tools the model has NO way to read/edit it — it would spin (spawning a
+    # futile local Explore) until the timeout. Tell the user how to enable it instead.
+    if not GITHUB_MCP_ENABLED and any(k in routing_text.lower() for k in GITHUB_KEYWORDS):
+        return ("🔒 GitHub tools are off, so I can't read the repo or open a PR/issue. "
+                "Set GITHUB_MCP_ENABLED=true (and a valid GITHUB_TOKEN) on Railway, then retry.")
+
     model = opencode_model_for(_is_structural(routing_text))
     if USE_ORCHESTRATOR:
         return run_opencode(full_prompt, model=model, agent="orchestrator",

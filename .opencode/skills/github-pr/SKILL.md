@@ -22,10 +22,18 @@ GitHub actions are for repos under the **`hmcc-global`** org. If the request nam
 repo, default to **`hmcc-global/hmcchk-web`** (per `AGENTS.md`). Confirm the repo only if
 the request is ambiguous.
 
+## The repo is REMOTE — read it through the MCP
+
+The target repo is **not checked out anywhere locally** — this is API-only. To see
+existing code (e.g. to find the file/lines to change), **read and search it through the
+GitHub MCP** (e.g. `get_file_contents`, repo search). **Do NOT** search the local
+filesystem or spawn an Explore/file-search agent — the code is not on disk, so that just
+hangs. No GitHub MCP = no repo access = you cannot do this; stop and say so.
+
 ## Flow
 
 1. Resolve the repo (`hmcc-global/<repo>`, default `hmcchk-web`) and its default branch
-   (usually `main`).
+   (usually `main`). Read the file(s) you need to change via the GitHub MCP first.
 2. `create_branch` — a short, descriptive branch off the default branch, e.g.
    `fix/sermon-date-parse`, `feat/add-help-command`.
 3. `push_files` — create/update only the files this change touches. Keep it small and

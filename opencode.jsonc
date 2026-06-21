@@ -50,6 +50,10 @@
       "enabled": false
     },
     "github": {
+      // NOTE: this "enabled" is OVERRIDDEN AT RUNTIME by the GITHUB_MCP_ENABLED env var
+      // (core._build_runtime_config regenerates the config) — flip it from Railway, not
+      // here. Off by default: the remote MCP must be reached on every run and, on a small
+      // local model, bloats context / hangs at init if its token is missing.
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer {env:GITHUB_TOKEN}" },
